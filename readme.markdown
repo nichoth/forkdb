@@ -16,6 +16,18 @@ library is based.
 
 [![build status](https://secure.travis-ci.org/substack/forkdb.png)](http://travis-ci.org/substack/forkdb)
 
+# Contents
+
+  * [examples](#example)
+    * [replication](#replication)
+    * [api example](#api-example)
+  * [data model](#data-model)
+  * [methods](#methods)
+  * [usage](#usage)
+  * [install](#install)
+  * [license](#license)
+
+
 # example
 
 Here we'll create a new document with the contents `beep boop` under the key
@@ -301,7 +313,7 @@ database.
 
 Constrain the output stream by passing in `opts.gt`, `opts.lt`, or `opts.limit`.
 
-## fdb.get(hash, cb) 
+## fdb.get(hash, cb)
 
 Get the metadata for `hash` and call `cb(err, meta)` with the result.
 
@@ -374,7 +386,7 @@ usage: forkdb COMMAND OPTIONS
 
     -d, --dir  directory to use for both db and blob storage
                If not specified, uses $FORKDB_DIR or ./forkdb
- 
+
     --blobdir  directory to use for blob storage
 
     --dbdir    directory to use for db
@@ -384,7 +396,7 @@ forkdb create KEY {--prev=HASH ...}
   Create a new document with content from stdin under KEY.
   Set pointers to previous content with "--prev". To point back at multiple
   documents (a merge), use --prev more than once.
-  
+
 forkdb list {--lt=LT, --gt=GT, --limit=LIMIT}
 
   List all the document metadata in the database.
@@ -434,7 +446,7 @@ forkdb pull {OPTIONS} # pull updates
   Replicate with another forkdb using a replication strategy.
   stdin and stdout are used for incoming and outgoing traffic.
   Optionally:
-  
+
     --live  Keep the connection open for additional updates after the initial
             replication phase.
 
