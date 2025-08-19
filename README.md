@@ -1,6 +1,15 @@
-# forkdb
+# Forkdb
 
-forking content-addressed append-only historical key/value blob store over
+[![tests](https://img.shields.io/github/actions/workflow/status/substrate-system/forkdb/nodejs.yml?style=flat-square)](https://github.com/substrate-system/forkdb/actions/workflows/nodejs.yml)
+[![types](https://img.shields.io/npm/types/@substrate-system/icons?style=flat-square)](README.md)
+[![module](https://img.shields.io/badge/module-ESM%2FCJS-blue?style=flat-square)](README.md)
+[![semantic versioning](https://img.shields.io/badge/semver-2.0.0-blue?logo=semver&style=flat-square)](https://semver.org/)
+[![Common Changelog](https://nichoth.github.io/badge/common-changelog.svg)](./CHANGELOG.md)
+[![install size](https://flat.badgen.net/packagephobia/install/@substrate-system/forkdb)](https://packagephobia.com/result?p=@substrate-system/forkdb)
+[![license](https://img.shields.io/badge/license-Big_Time-blue?style=flat-square)](LICENSE)
+
+
+Forking content-addressed append-only historical key/value blob store over
 leveldb with multi-master replication
 
 Conflicts are unavoidable, particularly when latency is high. Instead of hiding
@@ -14,9 +23,26 @@ For a lower-level version of just the link management for multi-master
 replication, check out [fwdb](https://npmjs.org/package/fwdb), upon which this
 library is based.
 
-[![build status](https://secure.travis-ci.org/substack/forkdb.png)](http://travis-ci.org/substack/forkdb)
+<details><summary><h2>Contents</h2></summary>
+<!-- toc -->
+</details>
 
-# example
+## Install
+
+With [npm](https://npmjs.org),
+to get the `forkdb` command do:
+
+```sh
+npm install -g forkdb
+```
+
+and to get the library do:
+
+```sh
+npm install forkdb
+```
+
+## Example
 
 Here we'll create a new document with the contents `beep boop` under the key
 `"blorp"`.
@@ -99,7 +125,7 @@ $ forkdb history 058647fc544f70a96d5d083ae7e3c373b441fc3d55b993407254fcce3c732f1
  |- blorp :: 9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0
 ```
 
-## replication
+## Replication
 
 First, we'll populate two databases, `/tmp/a` and `/tmp/b` with some data:
 
@@ -173,7 +199,7 @@ $ forkdb -d /tmp/b forks msg
 
 Replication woo.
 
-## api example
+## API Example
 
 Create a forkdb instance by passing in a leveldown or levelup handle and a path
 to where the blobs should go. Then you can use `createWriteStream(meta)` to
@@ -199,7 +225,7 @@ $ echo beep boop | node create.js '{"key":"blorp"}'
 9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0
 ```
 
-# data model
+## Data Model
 
 The data model is append-only. Each document operates under a key and may
 reference zero or more other documents by the hash of their content, which
@@ -226,7 +252,7 @@ forward and backward traversals. Forward links, heads, and tails are all
 generated purely for performance reasons since these can all be computed, albeit
 slowly, from the backward links.
 
-# methods
+## Methods
 
 ``` js
 var forkdb = require('forkdb')
@@ -248,13 +274,13 @@ Optionally set:
 To run both the command-line tool and the api over the same data simultaneously,
 use [level-party](https://npmjs.org/package/level-party) to create the `db`.
 
-## var w = fdb.createWriteStream(meta, opts={}, cb)
+### `const w = fdb.createWriteStream(meta, opts={}, cb)`
 
 Save the data written to the writable stream `w` into blob storage at
 `meta.key`. To link back to previous documents, specify an array of objects with
 `key` and `hash` properties as `meta.prev`. For example:
 
-``` js
+```js
 meta.key = 'blorp';
 meta.prev = [
   { key: 'blorp', hash: 'fcbcbe4389433dd9652d279bb9044b8e570d7f033fab18189991354228a43e99' },
@@ -269,48 +295,48 @@ Optionally, you can set an `opts.prebatch(rows, key, fn)` function that gets
 runs before `db.batch()` with the hash of the content, `key`. Your prebatch
 function should call `fn(err, rows)` with the rows to insert.
 
-## var r = fdb.createReadStream(hash)
+### var r = fdb.createReadStream(hash)
 
 Return a readable stream `r` with the blob content at `hash`.
 
-## var r = fdb.forks(key)
+### var r = fdb.forks(key)
 
 Return a readable object stream `r` that outputs an object with `key` and `hash`
 properties for every head of `key`.
 
 If `key` is undefined, all heads from all the keys are output.
 
-## var r = fdb.tails(key)
+### var r = fdb.tails(key)
 
 Return a readable object stream `r` that outputs an object with `key` and `hash`
 properties for every tail of `key`.
 
 If `key` is undefined, all tails from all the keys are output.
 
-## var r = fdb.list(opts)
+### var r = fdb.list(opts)
 
 Return a readable object stream `r` that outputs each metadata object for every
 document in the database.
 
 Constrain the output stream by passing in `opts.gt`, `opts.lt`, or `opts.limit`.
 
-## var r = fdb.keys(opts)
+### var r = fdb.keys(opts)
 
 Return a readable object stream `r` that outputs a record for every key in the
 database.
 
 Constrain the output stream by passing in `opts.gt`, `opts.lt`, or `opts.limit`.
 
-## fdb.get(hash, cb) 
+### fdb.get(hash, cb) 
 
 Get the metadata for `hash` and call `cb(err, meta)` with the result.
 
-## var r = fdb.links(hash)
+### var r = fdb.links(hash)
 
 Return a readable object stream `r` that outputs an object with `key` and `hash`
 properties for every forward link of `hash`.
 
-## var r = fdb.history(hash)
+### var r = fdb.history(hash)
 
 Return a readable object stream `r` that traverses backward starting from
 `hash`, outputting a metadata object for each document in the history.
@@ -319,7 +345,7 @@ When the traversal comes to a branch, `r` ends and emits a `'branch'` event with
 a `b` object for each branch. The branch object `b` has the same behavior as `r`
 and operates recursively.
 
-## var r = fdb.future(hash)
+### var r = fdb.future(hash)
 
 Return a readable object stream `r` that traverses forward starting from `hash`,
 outputting a metadata object for each document in the future history.
@@ -328,7 +354,7 @@ When the traversal comes to a branch, `r` ends and emits a `'branch'` event with
 a `b` object for each branch. The branch object `b` has the same behavior as `r`
 and operates recursively.
 
-## var d = fdb.replicate(opts={}, cb)
+### var d = fdb.replicate(opts={}, cb)
 
 Return a duplex stream `d` to replicate with another forkdb.
 Pipe the endpoints to each other, duplex stream style:
@@ -355,7 +381,7 @@ avoid sending hashes for sequences that remote hosts already know about.
 Set `opts.live` to `true` to keep the stream open for continuous streaming
 replication as new documents are created.
 
-## fdb.concestor(hashes, cb)
+### `fdb.concestor(hashes, cb)`
 
 Compute the
 [concestor](https://en.wikipedia.org/wiki/Most_recent_common_ancestor)
@@ -365,7 +391,7 @@ for `hashes`, an array of strings.
 there is no common ancestor. If there is a tie for recency, `cons` will contain
 more than one ancestor.
 
-# usage
+## Usage
 
 ```
 usage: forkdb COMMAND OPTIONS
@@ -441,20 +467,4 @@ forkdb pull {OPTIONS} # pull updates
 forkdb help
 
   Show this message.
-
-```
-
-# install
-
-With [npm](https://npmjs.org),
-to get the `forkdb` command do:
-
-```
-npm install -g forkdb
-```
-
-and to get the library do:
-
-```
-npm install forkdb
 ```
