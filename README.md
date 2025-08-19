@@ -24,7 +24,32 @@ replication, check out [fwdb](https://npmjs.org/package/fwdb), upon which this
 library is based.
 
 <details><summary><h2>Contents</h2></summary>
+
 <!-- toc -->
+
+- [Install](#install)
+- [Example](#example)
+- [Replication](#replication)
+- [API Example](#api-example)
+- [Data Model](#data-model)
+- [Methods](#methods)
+- [var fdb = forkdb(db, opts)](#var-fdb--forkdbdb-opts)
+  * [`const w = fdb.createWriteStream(meta, opts={}, cb)`](#const-w--fdbcreatewritestreammeta-opts-cb)
+  * [var r = fdb.createReadStream(hash)](#var-r--fdbcreatereadstreamhash)
+  * [var r = fdb.forks(key)](#var-r--fdbforkskey)
+  * [var r = fdb.tails(key)](#var-r--fdbtailskey)
+  * [var r = fdb.list(opts)](#var-r--fdblistopts)
+  * [var r = fdb.keys(opts)](#var-r--fdbkeysopts)
+  * [fdb.get(hash, cb)](#fdbgethash-cb)
+  * [var r = fdb.links(hash)](#var-r--fdblinkshash)
+  * [var r = fdb.history(hash)](#var-r--fdbhistoryhash)
+  * [var r = fdb.future(hash)](#var-r--fdbfuturehash)
+  * [var d = fdb.replicate(opts={}, cb)](#var-d--fdbreplicateopts-cb)
+  * [`fdb.concestor(hashes, cb)`](#fdbconcestorhashes-cb)
+- [Usage](#usage)
+
+<!-- tocstop -->
+
 </details>
 
 ## Install
