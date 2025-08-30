@@ -3,7 +3,6 @@ import wrap from 'level-option-wrap'
 import fwdb from 'fwdb'
 import exchange from 'hash-exchange'
 import { decode } from 'bytewise'
-import defined from 'defined'
 import has from 'has'
 import isarray from 'isarray'
 import stringify from 'json-stable-stringify'
@@ -16,6 +15,7 @@ import duplexer from 'duplexer2'
 import { EventEmitter } from 'events'
 import collect from './collect.js'
 import dropFirst from './drop_first.js'
+import { type WriteStream } from 'node:fs'
 
 // --- Helper functions ---
 function getPrev (meta: any): any[] {
@@ -43,16 +43,16 @@ function generateId (): string {
 
 export default class ForkDB extends EventEmitter {
     _running: boolean
-    _queue: Array<(cb: any) => void>
-    _seen: Record<string, any>
-    _db: any
-    db: any
-    _fwdb: any
-    store: any
-    _id: any
-    _seq: any
+    _queue:Array<(cb: any) => void>
+    _seen:Record<string, any>
+    _db:any
+    db:any
+    _fwdb:any
+    store:any
+    _id:any
+    _seq:any
 
-    constructor (db: any, opts: any = {}) {
+    constructor (db:any, opts:any = {}) {
         super()
         this._db = db
         this._fwdb = fwdb(db)
@@ -318,9 +318,9 @@ export default class ForkDB extends EventEmitter {
 
     createWriteStream (meta: any, opts: any, cb: any) {
         const input = through()
-        this._queue.push((fn: any) => {
+        this._queue.push((fn:any) => {
             const w = this._createWriteStream(meta, opts, cb)
-            w.on('error', (_err: any) => { fn() })
+            w.on('error', (_err:any) => { fn() })
             w.on('complete', () => { fn(null) })
             input.pipe(w)
         })
@@ -328,25 +328,16 @@ export default class ForkDB extends EventEmitter {
         return writeonly(input)
     }
 
-    _createWriteStream (meta: any, opts: any, cb: any) {
-        if (typeof meta === 'function') {
-            cb = meta
-            opts = {}
-            meta = {}
-        }
-        if (!meta || typeof meta !== 'object') meta = {}
-        if (typeof opts === 'function') {
-            cb = opts
-            opts = {}
-        }
-        if (!opts) opts = {}
+    _createWriteStream (
+        meta:any,
+        opts:{ prebatch?:(rows, key, commit)=>void } = {}
+    ):Promise<WriteStream> {
         const prebatch = defined(
             opts.prebatch,
-            (rows: any, key: any, fn: any) => { fn(null, rows) }
+            (rows:any, key:any, fn:any) => { fn(null, rows) }
         )
         const w = this.store.createWriteStream()
         w.write(stringify(meta) + '\n')
-        if (cb) w.on('error', cb)
 
         w.once('finish', () => {
             const prev = getPrev(meta)
@@ -579,6 +570,14 @@ export default class ForkDB extends EventEmitter {
             if (pending === 0) return cb(null, [])
         }
         next(hs)
+    }
+}
+
+function defined (...args) {
+    for (let i = 0; i < args.length; i++) {
+        if (typeof args[i] !== 'undefined') {
+            return args[i]
+        }
     }
 }
 

@@ -1,7 +1,18 @@
-import { test } from '@substrate-system/tapzero'
-import { example } from '../src/index.js'
-
-test('example', async t => {
-    t.ok('ok', 'should be an example')
-    example()
-})
+import './blob.js'
+import './concestor.js'
+import './forks.js'
+import './future.js'
+import './history.js'
+import './in_order.js'
+import './keys.js'
+import './meta.js'
+import './nonarray_prev.js'
+import './notmeta.js'
+import './out_of_order.js'
+import './prebatch.js'
+import './prebatch_invalid.js'
+import './pull_sync.js'
+import './push_pull.js'
+import './push_sync.js'
+import './replicate.js'
+import './since.js'
