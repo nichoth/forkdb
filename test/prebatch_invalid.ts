@@ -1,29 +1,29 @@
-const test = require('tape')
-const path = require('path')
-const level = require('level')
-const mkdirp = require('mkdirp')
-const through = require('through2')
-const concat = require('concat-stream')
+import { test } from '@substrate-system/tapzero'
+import path from 'node:path'
+import level from 'level'
+import { mkdirSync } from 'node:fs'
+import through from '../src/through.js'
+import concat from 'concat-stream'
+import { tmpdir } from 'node:os'
+import ForkDB from '../src/index.js'
 
-const tmpdir = path.join(
-    require('osenv').tmpdir(),
+const testDir = path.join(
+    tmpdir(),
     'forkdb-test-' + Math.random()
 )
-mkdirp.sync(tmpdir)
+mkdirSync(testDir, { recursive: true })
 
-const db = level(path.join(tmpdir, 'db'))
-const forkdb = require('../')
+const db = level(path.join(testDir, 'db'))
+const forkdb = new ForkDB(db, { dir: path.join(testDir, 'blob') })
 
-test('prebatch invalid', function (t) {
-    const fdb = forkdb(db, {
-        dir: path.join(tmpdir, 'blob')
-    })
+test('prebatch invalid', async function (t: any) {
+    const fdb = forkdb
     const opts = {
-        prebatch: function (rows, key, cb) { cb(null, 'yo') }
+        prebatch: function (rows, key: any, cb) { cb(null, 'yo') }
     }
 
     t.plan(1)
-    const w = fdb.createWriteStream({}, opts, function (err, hash) {
+    const w = fdb.createWriteStream({ key: 'test' }, opts, function (_err: any, hash: any) {
         t.ok(err)
     })
     w.end('ABC')

@@ -5,7 +5,7 @@
     "target": "ES2022",
     "moduleResolution": "NodeNext",
     "esModuleInterop": true,
-    "lib": ["ES2021"],
+    "lib": ["ES2022"],
     "allowJs": false,
     "skipLibCheck": true,
     "outDir": "dist",
@@ -16,14 +16,23 @@
     "sourceMap": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
-    "noImplicitAny": false,
+    "noImplicitAny": true,
     "declaration": true,
     "declarationDir": "dist",
-    "declarationMap": true
+    "declarationMap": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true
   },
   "include": [
     "src",
     "test",
     "lib.es5.d.ts"
+  ],
+  "files": [
+    "src/declarations.d.ts"
   ]
 }

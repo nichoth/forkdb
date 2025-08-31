@@ -1,29 +1,35 @@
 import { test } from '@substrate-system/tapzero'
 import path from 'node:path'
-import { Level } from 'level'
-import mkdirp from 'mkdirp'
+import level from 'level'
+import { mkdirSync } from 'node:fs'
 import concat from 'concat-stream'
-import os from 'node:os'
-import Forkdb from '../src/index.js'
+import { tmpdir } from 'node:os'
+import ForkDB from '../src/index.js'
 
-const tmpdir = path.join(
-    os.tmpdir(),
+const testDir = path.join(
+    tmpdir(),
     'forkdb-test-' + Math.random()
 )
-mkdirp.sync(tmpdir)
+mkdirSync(testDir, { recursive: true })
 
-const db = new Level(path.join(tmpdir, 'db'))
-const fdb = new Forkdb(db, { dir: path.join(tmpdir, 'blob') })
+const db = level(path.join(testDir, 'db'))
+const fdb = new ForkDB(db, { dir: path.join(testDir, 'blob') })
 
 const blob = Array(1000 * 200 + 1).join('A')
 
-test('blob', function (t) {
+test('blob', async function (t: any) {
     t.plan(2)
-    const w = fdb.createWriteStream({}, function (err, key) {
-        t.ifError(err)
-        fdb.createReadStream(key).pipe(concat(function (body) {
+    const key = await new Promise<string>((resolve, reject) => {
+        const w = fdb.createWriteStream({ key: 'blob' })
+        w.on('complete', (hash: string) => resolve(hash))
+        w.on('error', (err: any) => reject(err))
+        w.end(blob)
+    })
+
+    const body = await new Promise((resolve) => {
+        fdb.createReadStream(key).pipe(concat(function (body: any) {
             t.equal(body.toString('utf8'), blob)
+            resolve(body)
         }))
     })
-    w.end(blob)
 })

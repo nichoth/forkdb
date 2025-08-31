@@ -1,65 +1,65 @@
-const test = require('tape')
-const path = require('path')
-const level = require('level')
-const mkdirp = require('mkdirp')
-const through = require('through2')
-const concat = require('concat-stream')
+import { test } from '@substrate-system/tapzero'
+import path from 'node:path'
+import level from 'level'
+import { mkdirSync } from 'node:fs'
+import through from '../src/through.js'
+import concat from 'concat-stream'
+import { tmpdir } from 'node:os'
+import ForkDB from '../src/index.js'
 
-const tmpdir = path.join(
-    require('osenv').tmpdir(),
+const testDir = path.join(
+    tmpdir(),
     'forkdb-test-' + Math.random()
 )
-mkdirp.sync(tmpdir)
+mkdirSync(testDir, { recursive: true })
 
-const db = level(path.join(tmpdir, 'db'))
+const db = level(path.join(testDir, 'db'))
+const forkdb = new ForkDB(db, { dir: path.join(testDir, 'blob') })
 
-const hashes = [
+const hashes: string[] = [
     '9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0',
     'fcbcbe4389433dd9652d279bb9044b8e570d7f033fab18189991354228a43e99',
     'c3122c908bf03bb8b36eaf3b46e27437e23827e6a341439974d5d38fb22fbdfc',
     'e3bd9d14b8c298e57dbbb10235306bd46d12ebaeccd067dc9cdf7ed25b10a96d'
 ]
 
-const forkdb = require('../')
-const fdb = forkdb(db, { dir: path.join(tmpdir, 'blob') })
-
-test('populate history', function (t) {
+test('populate history', async function (t: any) {
     const docs = [
         {
-            hash: hashes[1],
+            hash: hashes[1]!,
             body: 'BEEP BOOP\n',
             meta: {
                 key: 'blorp',
-                prev: [{ hash: hashes[0], key: 'blorp' }]
+                prev: [{ hash: hashes[0]!, key: 'blorp' }]
             }
         },
         {
-            hash: hashes[3],
+            hash: hashes[3]!,
             body: 'BEEPITY BOOPITY\n',
             meta: {
                 key: 'blorp',
                 prev: [
-                    { hash: hashes[1], key: 'blorp' },
-                    { hash: hashes[2], key: 'blorp' }
+                    { hash: hashes[1]!, key: 'blorp' },
+                    { hash: hashes[2]!, key: 'blorp' }
                 ]
             }
         },
         {
-            hash: hashes[2],
+            hash: hashes[2]!,
             body: 'BeEp BoOp\n',
             meta: {
                 key: 'blorp',
-                prev: [{ hash: hashes[0], key: 'blorp' }]
+                prev: [{ hash: hashes[0]!, key: 'blorp' }]
             }
         },
-        { hash: hashes[0], body: 'beep boop\n', meta: { key: 'blorp' } },
+        { hash: hashes[0]!, body: 'beep boop\n', meta: { key: 'blorp' } },
     ]
     t.plan(docs.length * 2);
 
     (function next () {
         if (docs.length === 0) return
         const doc = docs.shift()
-        const w = fdb.createWriteStream(doc.meta, function (err, hash) {
+        const w = forkdb.createWriteStream(doc.meta, function (_err: any, hash: any) {
             t.ifError(err)
             t.equal(doc.hash, hash)
             next()
@@ -68,22 +68,22 @@ test('populate history', function (t) {
     })()
 })
 
-test('history', function (t) {
+test('history', async function (t: any) {
     t.plan(6)
-    fdb.history(hashes[0]).pipe(collect(function (rows) {
-        t.deepEqual(mhashes(rows), [hashes[0]], 'history 0')
+    forkdb.history(hashes[0]!).pipe(collect(function (rows) {
+        t.deepEqual(mhashes(rows), [hashes[0]!], 'history 0')
     }))
-    fdb.history(hashes[1]).pipe(collect(function (rows) {
-        t.deepEqual(mhashes(rows), [hashes[1], hashes[0]], 'history 1')
+    forkdb.history(hashes[1]!).pipe(collect(function (rows) {
+        t.deepEqual(mhashes(rows), [hashes[1]!, hashes[0]!], 'history 1')
     }))
-    fdb.history(hashes[2]).pipe(collect(function (rows) {
-        t.deepEqual(mhashes(rows), [hashes[2], hashes[0]], 'history 2')
+    forkdb.history(hashes[2]!).pipe(collect(function (rows) {
+        t.deepEqual(mhashes(rows), [hashes[2]!, hashes[0]!], 'history 2')
     }))
 
-    const h3 = fdb.history(hashes[3])
+    const h3 = forkdb.history(hashes[3]!)
     const ex3 = [
-        [hashes[1], hashes[0]],
-        [hashes[2], hashes[0]],
+        [hashes[1]!, hashes[0]!],
+        [hashes[2]!, hashes[0]!],
     ]
     h3.on('branch', function (b) {
         const ex = ex3.shift()
@@ -92,14 +92,14 @@ test('history', function (t) {
         }))
     })
     h3.pipe(collect(function (rows) {
-        t.deepEqual(mhashes(rows), [hashes[3]])
+        t.deepEqual(mhashes(rows), [hashes[3]!])
     }))
 })
 
-function collect (cb) {
-    const rows = []
+function collect (cb: any) {
+    const rows: any[] = []
     return through.obj(write, end)
-    function write (row, enc, next) { rows.push(row); next() }
+    function write (row: any, _enc: any, next: any) { rows.push(row); next() }
     function end () { cb(rows) }
 }
 

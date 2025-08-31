@@ -1,35 +1,48 @@
 import blob from 'content-addressable-blob-store'
 import wrap from 'level-option-wrap'
-import fwdb from 'fwdb'
+import FWDB from './fwdb.js'
 import exchange from 'hash-exchange'
 import { decode } from 'bytewise'
 import has from 'has'
-import isarray from 'isarray'
 import stringify from 'json-stable-stringify'
 import uniq from 'uniq'
-import through from 'through2'
+import through from './through.js'
 import { Readable } from 'readable-stream'
 import readonly from 'read-only-stream'
 import writeonly from 'write-only-stream'
 import duplexer from 'duplexer2'
 import { EventEmitter } from 'events'
-import collect from './collect.js'
-import dropFirst from './drop_first.js'
 import { type WriteStream } from 'node:fs'
+import type {
+    Meta,
+    ForkDBOptions,
+    ReplicateOptions,
+    PrebatchOptions,
+    DBRow,
+    ForkDBDocument,
+    LinksEntry,
+    HeadsEntry
+} from './types.js'
 
 // --- Helper functions ---
-function getPrev (meta: any): any[] {
+function getPrev (meta: Meta | null): string[] {
     if (!meta) return []
     if (!has(meta, 'prev')) return []
-    let prev = meta.prev
-    if (!isarray(prev)) prev = [prev]
-    return prev.map((p: any) => {
+    const prev = meta.prev
+    if (!prev) return []
+    if (!Array.isArray(prev)) {
+        return [prev as string].map((p: any) => {
+            if (p && typeof p === 'object' && p.hash) return p.hash
+            return p
+        }).filter(Boolean) as string[]
+    }
+    return (prev as string[]).map((p: any) => {
         if (p && typeof p === 'object' && p.hash) return p.hash
         return p
-    }).filter(Boolean)
+    }).filter(Boolean) as string[]
 }
 
-function hashOf (p: any): any {
+function hashOf (p: any): string {
     return p && typeof p === 'object' ? p.hash : p
 }
 
@@ -41,21 +54,56 @@ function generateId (): string {
     return s
 }
 
-export default class ForkDB extends EventEmitter {
-    _running: boolean
-    _queue:Array<(cb: any) => void>
-    _seen:Record<string, any>
-    _db:any
-    db:any
-    _fwdb:any
-    store:any
-    _id:any
-    _seq:any
+export function defined (...args: any[]): any {
+    for (let i = 0; i < args.length; i++) {
+        if (typeof args[i] !== 'undefined') {
+            return args[i]
+        }
+    }
+}
 
-    constructor (db:any, opts:any = {}) {
+// --- Inline dropFirst function ---
+function dropFirst<T = any> (cb?: (err: Error | null, meta?: T) => void) {
+    let line = false
+    const bufs: Buffer[] | null = cb ? [] : null
+    return through(function (this: any, buf: Buffer, _enc: BufferEncoding, next: () => void) {
+        if (line) {
+            this.push(buf)
+            return next()
+        }
+        for (let i = 0; i < buf.length; i++) {
+            if (buf[i] === 10) {
+                line = true
+                if (bufs) bufs.push(buf.slice(0, i))
+                if (cb && bufs) {
+                    const b = Buffer.concat(bufs).toString('utf8')
+                    let meta: T
+                    try { meta = JSON.parse(b) } catch (err) { return cb(err as Error) }
+                    cb(null, meta)
+                }
+                this.push(buf.slice(i + 1))
+                return next()
+            }
+        }
+        if (bufs) bufs.push(buf)
+    })
+}
+
+export default class ForkDB extends EventEmitter {
+    private _running: boolean
+    private _queue: Array<() => Promise<void>>
+    private _seen: Record<string, number>
+    private _db: any
+    db: any
+    private _fwdb: any
+    store: any
+    private _id: string | undefined
+    private _seq: number | undefined
+
+    constructor (db: any, opts: ForkDBOptions = {}) {
         super()
         this._db = db
-        this._fwdb = fwdb(db)
+        this._fwdb = new FWDB(db)
         this.db = this._fwdb.db
         this.store = defined(
             opts.store,
@@ -65,175 +113,193 @@ export default class ForkDB extends EventEmitter {
         this._queue = []
         this._id = opts.id
         this._running = false
+
         if (this._id === undefined) {
-            this._queue.push((cb: any) => {
-                this._getId((err: any, id: any) => {
-                    if (err) return cb(err)
-                    this._id = id
-                    cb(null)
-                })
+            this._queue.push(async () => {
+                this._id = await this._getId()
             })
         }
-        this._queue.push((cb: any) => {
-            this._getSeq((err: any, seq: any) => {
-                if (err) return cb(err)
-                this._seq = seq
-                cb(null)
-            })
+
+        this._queue.push(async () => {
+            this._seq = await this._getSeq()
         })
+
         this._runQueue()
     }
 
     // Run the queued initialization functions
-    _runQueue () {
+    private async _runQueue (): Promise<void> {
         if (this._running) return
         this._running = true
-        const next = () => {
-            if (this._queue.length === 0) {
-                this._running = false
-                return
+
+        try {
+            for (const fn of this._queue) {
+                await fn()
             }
-            const fn = this._queue.shift()
-            if (fn) {
-                fn((err: any) => {
-                    if (err) this.emit('error', err)
-                    else next()
-                })
-            }
+        } catch (err) {
+            this.emit('error', err)
+        } finally {
+            this._running = false
         }
-        next()
     }
 
-    _getId (cb: (err: any, value?: any) => void) {
-        this.db.get('_id', (err: any, value: any) => {
-            if (err && err.type === 'NotFoundError') {
-                value = generateId()
-                this.db.put('_id', value, (err: any) => {
-                    if (err) return cb(err)
-                    cb(null, value)
-                })
-            } else if (err) return cb(err)
-            else cb(null, value)
+    private async _getId (): Promise<string> {
+        try {
+            return await this.db.get('_id')
+        } catch (err: any) {
+            if (err.type === 'NotFoundError') {
+                const value = generateId()
+                await this.db.put('_id', value)
+                return value
+            }
+            throw err
+        }
+    }
+
+    private async _getSeq (): Promise<number> {
+        return new Promise((resolve, reject) => {
+            const r = this.db.createReadStream({
+                gt: ['seq', null],
+                lt: ['seq', undefined],
+                reverse: true,
+                limit: 1
+            })
+            r.on('error', reject)
+            r.pipe(through.obj(
+                (row: any, _enc: BufferEncoding, _next: () => void) => {
+                    resolve(row.key[1])
+                },
+                () => {
+                    resolve(0)
+                }
+            ))
         })
     }
 
-    _getSeq (cb: (err: any, seq?: any) => void) {
-        const r = this.db.createReadStream({
-            gt: ['seq', null],
-            lt: ['seq', undefined],
-            reverse: true,
-            limit: 1
-        })
-        r.on('error', cb)
-        r.pipe(through.obj(
-            (row: any, _enc: BufferEncoding, _next: () => void) => { cb(null, row.key[1]) },
-            () => { cb(null, 0) }
-        ))
-    }
-
-    _getSeen (id: any, cb: (err: any, n?: any) => void) {
+    private async _getSeen (id: string): Promise<number> {
         if (has(this._seen, id)) {
-            return process.nextTick(() => {
-                cb(null, this._seen[id])
-            })
+            return this._seen[id]!
         }
-        this.db.get(['_seen', id], (err: any, seq: any) => {
-            if (err && err.type !== 'NotFoundError') return cb(err)
+
+        try {
+            const seq = await this.db.get(['_seen', id])
             const n = this._seen[id] = defined(seq, -1)
-            cb(null, n)
-        })
+            return n
+        } catch (err: any) {
+            if (err.type !== 'NotFoundError') throw err
+            const n = this._seen[id] = -1
+            return n
+        }
     }
 
-    _addSeen (id: any, aseq: any, cb: (err: any, op?: any) => void) {
-        this._getSeen(id, (err: any, seq: any) => {
-            if (err) return cb(err)
-            const mseq = Math.max(seq, aseq) || 0
-            this._seen[id] = mseq
-            cb(null, {
-                type: 'put',
-                key: ['_seen', id],
-                value: mseq
-            })
-        })
+    private async _addSeen (id: string, aseq: number): Promise<DBRow> {
+        const seq = await this._getSeen(id)
+        const mseq = Math.max(seq, aseq) || 0
+        this._seen[id] = mseq
+        return {
+            type: 'put',
+            key: ['_seen', id],
+            value: mseq
+        }
     }
 
-    replicate (opts: any, cb: any) {
-        const input = through(); const output = through()
+    replicate (opts: ReplicateOptions | ((err: any, hs: any) => void) = {}): any {
+        const input = through()
+        const output = through()
         const dup = duplexer(input, output)
-        this._queue.push((fn: any) => {
-            const r = this._replicate(opts, cb)
+
+        // Handle backward compatibility with callback
+        let callback: ((err: any, hs: any) => void) | undefined
+        let replicateOpts: ReplicateOptions = {}
+
+        if (typeof opts === 'function') {
+            callback = opts
+        } else {
+            replicateOpts = opts
+        }
+
+        this._queue.push(async () => {
+            const r = this._replicate(replicateOpts)
             r.on('available', dup.emit.bind(dup, 'available'))
             r.on('response', dup.emit.bind(dup, 'response'))
             r.on('since', dup.emit.bind(dup, 'since'))
-
+            if (callback) {
+                dup.on('available', (hs: any) => callback!(null, hs))
+                dup.on('error', (err: any) => callback!(err, []))
+            }
             input.pipe(r).pipe(output)
-            fn()
         })
+
         this._runQueue()
         return dup
     }
 
-    _replicate (opts: any, cb: any) {
-        if (typeof opts === 'function') {
-            cb = opts
-            opts = {}
-        }
-        if (!opts) opts = {}
-        if (!cb) cb = function () {}
-
+    private _replicate (opts: ReplicateOptions = {}): any {
         const mode = defined(opts.mode, 'sync')
         const errors: any[] = []
         const exchanged: any[] = []
         let pending = 1
 
-        const ex = exchange((hash: any, fn: any) => {
+        const ex = exchange((hash: string, fn: any) => {
             if (mode === 'pull') {
                 if (pending === 0) done()
                 return
             }
             pending++
 
-            this.db.get(['seq-hash', hash], (err: any, seq: any) => {
-                if (err) return cb(err)
+            this.db.get(['seq-hash', hash]).then((seq: number) => {
                 const r = this.store.createReadStream({ key: hash })
-                r.on('error', cb)
-                r.on('end', () => { if (--pending === 0) done() })
+                r.on('error', (_err:any) => {
+                    if (--pending === 0) done()
+                })
+                r.on('end', () => {
+                    if (--pending === 0) done()
+                })
                 fn(null, r, seq)
+            }).catch((_err: any) => {
+                if (--pending === 0) done()
             })
         })
+
         ex.id(JSON.stringify([this._id, mode]))
 
         const other: any = {}
-        ex.on('id', (id: any) => {
+        ex.on('id', async (id: string) => {
             pending--
             let p: any
             try { p = JSON.parse(id) } catch (_err) { return ex.destroy() }
             other.id = p[0]
             other.mode = p[1]
-            this._getSeen(other.id, (err: any, seq: any) => {
-                if (err) return cb(err)
-                else ex.since(seq)
-            })
-        })
-        ex.on('since', (seq: any) => {
-            provideSeq(seq)
-        })
-        ex.on('seen', (seq: any) => {
-            this._addSeen(other.id, seq, () => {})
+            try {
+                const seq = await this._getSeen(other.id)
+                ex.since(seq)
+            } catch (_err) {
+                // Handle error
+            }
         })
 
-        const provideSeq = (seq: any) => {
-            let hashes: any[] = []
+        ex.on('since', (seq: number) => {
+            provideSeq(seq)
+        })
+
+        ex.on('seen', async (seq: number) => {
+            await this._addSeen(other.id, seq)
+        })
+
+        const provideSeq = (seq: number) => {
+            let hashes: string[] = []
             const r = this.db.createReadStream({
                 gt: ['seq', defined(seq, null)],
                 lt: ['seq', undefined]
             })
             let provided = 0
+
             function flush (this: any) {
                 if (hashes.length) ex.provide(hashes)
                 hashes = []
                 if (provided === 0) done()
             }
+
             r.pipe(through.obj(
                 (row: any, _enc: BufferEncoding, next: () => void) => {
                     hashes.push(row.value)
@@ -245,59 +311,61 @@ export default class ForkDB extends EventEmitter {
             ))
         }
 
-        ex.on('available', (hashes: any[]) => {
+        ex.on('available', async (hashes: string[]) => {
             if (mode === 'push') return
             let p = hashes.length
-            const needed: any[] = []
+            const needed: string[] = []
             if (mode === 'sync' && other.mode === 'pull') return
 
-            hashes.forEach((h: any) => {
-                this.get(h, (err: any) => {
-                    if (err) needed.push(h)
-                    if (--p === 0) {
-                        pending += needed.length
-                        ex.request(needed)
-                    }
-                })
-            })
-        })
-
-        ex.on('response', (hash: any, stream: any, seq: any) => {
-            const opts = {
-                expected: hash, // TODO: verify hash
-                prebatch: (rows: any, key: any, fn: any) => {
-                    this._addSeen(other.id, seq, (err: any, rows_: any) => {
-                        if (err) fn(null, rows)
-                        else fn(null, rows.concat(rows_))
-                    })
+            for (const h of hashes) {
+                try {
+                    await this.get(h)
+                } catch (_err) {
+                    needed.push(h)
+                }
+                p--
+                if (p === 0) {
+                    pending += needed.length
+                    ex.request(needed)
                 }
             }
-            const df = dropFirst((err: any, dmeta: any) => {
+        })
+
+        ex.on('response', async (hash: string, stream: any, seq: number) => {
+            const opts = {
+                expected: hash, // TODO: verify hash
+                prebatch: async (rows: any[], _key: string, fn: any) => {
+                    try {
+                        const rows_ = await this._addSeen(other.id, seq)
+                        fn(null, rows.concat([rows_]))
+                    } catch (_err) {
+                        fn(null, rows)
+                    }
+                }
+            }
+
+            const df = dropFirst(async (err: any, dmeta: any) => {
                 if (err) {
                     errors.push(err)
                     if (--pending === 0) done()
                     return
                 }
-                df.pipe(this.createWriteStream(dmeta, opts, (err: any) => {
-                    if (err) {
-                        errors.push(err)
-                        if (--pending === 0) done()
-                    } else {
-                        exchanged.push(hash)
-                        this._addSeen(other.id, seq, (err: any) => {
-                            if (err) cb(err)
-                            else if (--pending === 0) done()
-                            ex.seen(seq)
-                        })
-                    }
-                }))
+
+                const w = await this._createWriteStream(dmeta, opts)
+                df.pipe(w)
+                w.on('complete', async () => {
+                    exchanged.push(hash)
+                    await this._addSeen(other.id, seq)
+                    ex.seen(seq)
+                    if (--pending === 0) done()
+                })
             })
             stream.pipe(df)
         })
 
         if (opts.live) {
             this._db.on('batch', (rows: any[]) => {
-                const hashes: any[] = []
+                const hashes: string[] = []
                 rows.forEach((row: any) => {
                     let key: any
                     try { key = decode(decode(row.key)[1]) } catch (_err) { return }
@@ -308,92 +376,139 @@ export default class ForkDB extends EventEmitter {
                 if (hashes.length) ex.provide(hashes)
             })
         }
+
         return ex
 
         function done () {
-            if (cb) cb(errors.length ? errors : null, exchanged)
             ex.emit('sync', exchanged)
         }
     }
 
-    createWriteStream (meta: any, opts: any, cb: any) {
+    createWriteStream (meta: Meta, opts: PrebatchOptions | ((err: any, hash: string) => void) = {}): any {
         const input = through()
-        this._queue.push((fn:any) => {
-            const w = this._createWriteStream(meta, opts, cb)
-            w.on('error', (_err:any) => { fn() })
-            w.on('complete', () => { fn(null) })
+
+        // Handle backward compatibility with callback
+        let callback: ((err: any, hash: string) => void) | undefined
+        let prebatchOpts: PrebatchOptions = {}
+
+        if (typeof opts === 'function') {
+            callback = opts
+        } else {
+            prebatchOpts = opts
+        }
+
+        this._queue.push(async () => {
+            const w = await this._createWriteStream(meta, prebatchOpts)
+            w.on('error', (err: any) => {
+                if (callback) callback(err, '')
+            })
+            w.on('complete', (hash: string) => {
+                if (callback) callback(null, hash)
+            })
             input.pipe(w)
         })
         this._runQueue()
         return writeonly(input)
     }
 
-    _createWriteStream (
-        meta:any,
-        opts:{ prebatch?:(rows, key, commit)=>void } = {}
-    ):Promise<WriteStream> {
+    private async _createWriteStream (
+        meta: Meta,
+        opts: PrebatchOptions = {}
+    ): Promise<WriteStream> {
         const prebatch = defined(
             opts.prebatch,
-            (rows:any, key:any, fn:any) => { fn(null, rows) }
+            (rows: any[], _key: string, fn: any) => { fn(null, rows) }
         )
+
         const w = this.store.createWriteStream()
         w.write(stringify(meta) + '\n')
 
-        w.once('finish', () => {
-            const prev = getPrev(meta)
-            const doc = { hash: w.key, key: meta.key, prev }
+        return new Promise((resolve, reject) => {
+            w.once('finish', async () => {
+                try {
+                    const prev = getPrev(meta)
+                    const doc: ForkDBDocument = { hash: w.key, key: meta.key, prev }
 
-            this._fwdb._create(doc, (err: any, rows: any) => {
-                if (err) return w.emit('error', err)
-                if (prev.length === 0) {
-                    rows.push({
-                        type: 'put',
-                        key: ['tail', meta.key, w.key],
-                        value: 0
+                    const rows = await this._fwdb._create(doc)
+
+                    if (prev.length === 0) {
+                        rows.push({
+                            type: 'put',
+                            key: ['tail', meta.key, w.key],
+                            value: 0
+                        })
+                    }
+
+                    const skey = ['seq', ++this._seq!]
+                    const shkey = ['seq-hash', w.key]
+                    rows.push({ type: 'put', key: ['meta', w.key], value: meta })
+                    rows.push({ type: 'put', key: shkey, value: this._seq })
+                    rows.push({ type: 'put', key: skey, value: w.key })
+
+                    prebatch(rows, w.key, async (err: any, finalRows: any[]) => {
+                        if (err) {
+                            w.emit('error', err)
+                            reject(err)
+                            return
+                        }
+                        if (!Array.isArray(finalRows)) {
+                            const error = new Error('prebatch result is not an array')
+                            w.emit('error', error)
+                            reject(error)
+                            return
+                        }
+
+                        await this.db.batch(finalRows)
+                        w.emit('complete', w.key)
+                        this.emit('create', w.key)
+                        resolve(w)
                     })
+                } catch (err) {
+                    w.emit('error', err)
+                    reject(err)
                 }
-                const skey = ['seq', ++this._seq]
-                const shkey = ['seq-hash', w.key]
-                rows.push({ type: 'put', key: ['meta', w.key], value: meta })
-                rows.push({ type: 'put', key: shkey, value: this._seq })
-                rows.push({ type: 'put', key: skey, value: w.key })
-                prebatch(rows, w.key, commit)
             })
         })
-        return w
+    }
 
-        const commit = (err: any, rows: any) => {
-            if (err) return w.emit('error', err)
-            if (!isarray(rows)) {
-                return w.emit('error', new Error(
-                    'prebatch result is not an array'
-                ))
-            }
-            this.db.batch(rows, (err: any) => {
-                if (err) return w.emit('error', err)
-                if (cb) cb(null, w.key)
-                w.emit('complete', w.key)
-                this.emit('create', w.key)
+    async forks (key: string, opts: any = {}): Promise<HeadsEntry[]> {
+        return new Promise((resolve, reject) => {
+            this._fwdb.heads(key, opts, (err: any, result: HeadsEntry[]) => {
+                if (err) reject(err)
+                else resolve(result)
+            })
+        })
+    }
+
+    heads (key: string, opts: any = {}): Promise<HeadsEntry[]> | Readable {
+        // Handle backward compatibility with callback
+        if (typeof opts === 'function') {
+            const callback = opts
+            return new Promise((resolve, reject) => {
+                this._fwdb.heads(key, {}, (err: any, result: HeadsEntry[]) => {
+                    if (err) {
+                        callback(err, [])
+                        reject(err)
+                    } else {
+                        callback(null, result)
+                        resolve(result)
+                    }
+                })
             })
         }
+        return this.forks(key, opts)
     }
 
-    forks (key: any, opts: any, cb: any) {
-        return this._fwdb.heads(key, opts, cb)
+    async keys (opts: any = {}): Promise<string[]> {
+        return new Promise((resolve, reject) => {
+            this._fwdb.keys(opts, (err: any, result: string[]) => {
+                if (err) reject(err)
+                else resolve(result)
+            })
+        })
     }
 
-    heads = this.forks
-
-    keys (opts: any, cb: any) {
-        return this._fwdb.keys(opts, cb)
-    }
-
-    tails (key: any, opts: any, cb: any) {
-        if (typeof opts === 'function') {
-            cb = opts
-            opts = {}
-        }
-        if (!opts) opts = {}
+    tails (key: string, opts: any = {}): Readable {
         const r = this._fwdb.db.createReadStream(wrap(opts, {
             gt: (_x: any) => ['tail', key, null],
             lt: (_x: any) => ['tail', key, undefined]
@@ -403,17 +518,10 @@ export default class ForkDB extends EventEmitter {
             next()
         })
         r.on('error', (err: any) => { tr.emit('error', err) })
-        if (cb) tr.pipe(collect(cb))
-        if (cb) tr.on('error', cb)
         return readonly(r.pipe(tr))
     }
 
-    list (opts: any, cb: any) {
-        if (typeof opts === 'function') {
-            cb = opts
-            opts = {}
-        }
-        if (!opts) opts = {}
+    list (opts: any = {}): Readable {
         const r = this._fwdb.db.createReadStream(wrap(opts, {
             gt: (x: any) => ['meta', defined(x, null)],
             lt: (x: any) => ['meta', defined(x, undefined)]
@@ -422,92 +530,98 @@ export default class ForkDB extends EventEmitter {
             this.push({ meta: row.value, hash: row.key[1] })
             next()
         })
-        r.on('error', (err: any) => { tr.emit('error', err) })
-        if (cb) tr.pipe(collect(cb))
-        if (cb) tr.on('error', cb)
+        r.on('error', (err:Error) => { tr.emit('error', err) })
         return readonly(r.pipe(tr))
     }
 
-    createReadStream (hash: any) {
+    createReadStream (hash:string):Readable {
         const r = this.store.createReadStream({ key: hash })
         return readonly(r.pipe(dropFirst()))
     }
 
-    get (hash: any, cb: any) {
-        this._fwdb.db.get(['meta', hash], (err: any, meta: any) => {
-            if (err && cb) cb(err)
-            else if (cb) cb(null, meta)
+    async get (hash:string):Promise<Meta> {
+        return await this._fwdb.db.get(['meta', hash])
+    }
+
+    async links (hash:string, opts:any = {}):Promise<LinksEntry[]> {
+        return new Promise((resolve, reject) => {
+            this._fwdb.links(hash, opts, (err:any, result:LinksEntry[]) => {
+                if (err) reject(err)
+                else resolve(result)
+            })
         })
     }
 
-    links (hash: any, opts: any, cb: any) {
-        return this._fwdb.links(hash, opts, cb)
-    }
-
-    history (hash: any) {
+    history (hash:string):Readable {
         const r = new Readable({ objectMode: true })
-        let next = hash
+        let next: string|undefined = hash
 
-        r._read = () => {
-            if (!next) return r.push(null)
-            this.get(next, onget)
-        }
-        return r
-
-        const onget = (err: any, meta: any) => {
-            if (err) return r.emit('error', err)
-            const hash = next
+        const onget = (meta: Meta) => {
+            const hash = next!
             const prev = getPrev(meta)
 
             if (prev.length === 0) {
-                next = null
+                next = undefined
                 r.push({ hash, meta })
             } else if (prev.length === 1) {
                 next = hashOf(prev[0])
                 r.push({ hash, meta })
             } else {
-                next = null
+                next = undefined
                 r.push({ hash, meta })
                 prev.forEach((p: any) => {
                     r.emit('branch', this.history(hashOf(p)))
                 })
             }
         }
+
+        r._read = (): void => {
+            if (!next) {
+                r.push(null)
+                return
+            }
+            this.get(next).then(onget).catch((err) => r.emit('error', err))
+        }
+
+        return r
     }
 
-    future (hash: any) {
+    future (hash: string): Readable {
         const r = new Readable({ objectMode: true })
-        let next = hash
+        let next: string | undefined = hash
 
-        r._read = () => {
-            if (!next) return r.push(null)
+        r._read = (): void => {
+            if (!next) {
+                r.push(null)
+                return
+            }
 
-            let pending = 2; const ref: { meta?: any; rows?: any[] } = {}
-            this.get(next, (err: any, meta: any) => {
-                if (err) return r.emit('error', err)
+            let pending = 2
+            const ref: { meta?: Meta; rows?: LinksEntry[] } = {}
+
+            this.get(next).then((meta: Meta) => {
                 ref.meta = meta
                 if (--pending === 0) done()
-            })
+            }).catch((err) => r.emit('error', err))
 
-            this.links(next, {}, (err: any, crows: any) => {
-                if (err) return r.emit('error', err)
+            this.links(next, {}).then((crows: LinksEntry[]) => {
                 ref.rows = crows
                 if (--pending === 0) done()
-            })
+            }).catch((err) => r.emit('error', err))
 
             const done = () => {
-                const prev = next
+                const prev = next!
                 if (!ref.rows || ref.rows.length === 0) {
-                    next = null
+                    next = undefined
                     r.push({ hash: prev, meta: ref.meta })
                 } else if (ref.rows.length === 1) {
                     next = hashOf(ref.rows[0])
                     r.push({ hash: prev, meta: ref.meta })
                 } else {
-                    next = null
+                    next = undefined
                     r.push({ hash: prev, meta: ref.meta })
                     if (ref.rows) {
-                        ref.rows.forEach((crow: any) => {
+                        ref.rows.forEach((crow: LinksEntry) => {
                             r.emit('branch', this.future(hashOf(crow)))
                         })
                     }
@@ -517,22 +631,22 @@ export default class ForkDB extends EventEmitter {
         return r
     }
 
-    concestor (hashes: any[], cb: any) {
+    async concestor (hashes: string[], callback?: (err: any, result: string[]) => void): Promise<string[]> {
         const seen: Record<string, number> = {}
         const seenh: Record<number, Record<string, boolean>> = {}
-        const hs = hashes.map((h: any) => [h])
-        hashes.forEach((h, ix) => {
+        const hs = hashes.map((h: string) => [h])
+        hashes.forEach((_h, ix) => {
             seenh[ix] = {}
         })
 
-        const next = (hashes: any[]) => {
-            let results: any[] | null = null
+        const next = async (hashes: string[][]): Promise<string[]> => {
+            let results: string[] | null = null
             for (let i = 0; i < hashes.length; i++) {
-                const hs = hashes[i]
+                const hs = hashes[i]!
                 for (let j = 0; j < hs.length; j++) {
-                    const hash = hs[j]
+                    const hash = hs[j]!
                     if (!has(seenh[i], hash)) {
-                        seenh[i][hash] = true
+                        seenh[i]![hash] = true
                         seen[hash] = (seen[hash] || 0) + 1
                     }
                     if (seen[hash] === hashes.length) {
@@ -541,43 +655,39 @@ export default class ForkDB extends EventEmitter {
                     }
                 }
             }
-            if (results && results.length) return cb(null, uniq(results))
+            if (results && results.length) return uniq(results)
 
-            let pending = 0
-            const prev: any[] = []
+            const prev:string[][] = []
+            const promises:Promise<void>[] = []
 
             hashes.forEach((hs, ix) => {
-                pending += hs.length
                 prev[ix] = []
-                hs.forEach((hash: any) => {
-                    this.get(hash, (err: any, value: any) => {
-                        if (err) {
-                            // Handle error by calling the callback with error
-                            if (--pending === 0) next(prev)
-                            return
-                        }
-                        if (!value) {
-                            // do nothing
-                        } else if (isarray(value.prev)) {
-                            prev[ix].push(...value.prev.map(hashOf))
-                        } else if (value.prev) {
-                            prev[ix].push(value.prev)
-                        }
-                        if (--pending === 0) next(prev)
-                    })
+                hs.forEach((hash: string) => {
+                    promises.push(
+                        this.get(hash).then((value:Meta) => {
+                            if (!value) {
+                                // do nothing
+                            } else if (Array.isArray(value.prev)) {
+                                prev[ix]!.push(...value.prev.map(hashOf))
+                            } else if (value.prev) {
+                                prev[ix]!.push(value.prev)
+                            }
+                        }).catch(() => {
+                            // Handle error silently
+                        })
+                    )
                 })
             })
-            if (pending === 0) return cb(null, [])
-        }
-        next(hs)
-    }
-}
 
-function defined (...args) {
-    for (let i = 0; i < args.length; i++) {
-        if (typeof args[i] !== 'undefined') {
-            return args[i]
+            await Promise.all(promises)
+            return next(prev)
         }
+
+        const result = await next(hs)
+        if (callback) {
+            callback(null, result)
+        }
+        return result
     }
 }
 

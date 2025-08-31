@@ -1,53 +1,55 @@
-const test = require('tape')
-const path = require('path')
-const level = require('level')
-const mkdirp = require('mkdirp')
-const through = require('through2')
-const concat = require('concat-stream')
+import { test } from '@substrate-system/tapzero'
+import path from 'node:path'
+import level from 'level'
+import { mkdirSync } from 'node:fs'
+import through from '../src/through.js'
+import concat from 'concat-stream'
+import { tmpdir } from 'node:os'
+import ForkDB from '../src/index.js'
 
-const tmpdir = path.join(
-    require('osenv').tmpdir(),
+const testDir = path.join(
+    tmpdir(),
     'forkdb-test-' + Math.random()
 )
-mkdirp.sync(tmpdir)
+mkdirSync(testDir, { recursive: true })
 
-const db = level(path.join(tmpdir, 'db'))
-const fdb = require('../')(db, { dir: path.join(tmpdir, 'blob') })
+const db = level(path.join(testDir, 'db'))
+const fdb = new ForkDB(db, { dir: path.join(testDir, 'blob') })
 
-const hashes = [
+const hashes: string[] = [
     '9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0',
     '1ffcdc9a4e47ee447ec72f38744f1ddd6b200a86389895aa249c9fc49bc04289',
     'b705af981e52c0fbfe9845ac1ba6d2a4f75a4677f1b6264b3b358315afe8f202',
     '6d4aeea6772e7bfc715fb42d0679f3bf2ffab77afc50588fd0264694d11ebf51'
 ]
 
-test('populate non-array prev', function (t) {
+test('populate non-array prev', async function (t: any) {
     const docs = [
-        { hash: hashes[0], body: 'beep boop\n', meta: { key: 'blorp' } },
+        { hash: hashes[0]!, body: 'beep boop\n', meta: { key: 'blorp' } },
         {
-            hash: hashes[1],
+            hash: hashes[1]!,
             body: 'BEEP BOOP\n',
             meta: {
                 key: 'blorp',
-                prev: { hash: hashes[0], key: 'blorp' }
+                prev: { hash: hashes[0]!, key: 'blorp' }
             }
         },
         {
-            hash: hashes[2],
+            hash: hashes[2]!,
             body: 'BeEp BoOp\n',
             meta: {
                 key: 'blorp',
-                prev: { hash: hashes[0], key: 'blorp' }
+                prev: { hash: hashes[0]!, key: 'blorp' }
             }
         },
         {
-            hash: hashes[3],
+            hash: hashes[3]!,
             body: 'BEEPITY BOOPITY\n',
             meta: {
                 key: 'blorp',
                 prev: [
-                    { hash: hashes[1], key: 'blorp' },
-                    { hash: hashes[2], key: 'blorp' }
+                    { hash: hashes[1]!, key: 'blorp' },
+                    { hash: hashes[2]!, key: 'blorp' }
                 ]
             }
         }
@@ -57,7 +59,7 @@ test('populate non-array prev', function (t) {
     (function next () {
         if (docs.length === 0) return
         const doc = docs.shift()
-        const w = fdb.createWriteStream(doc.meta, function (err, hash) {
+        const w = fdb.createWriteStream(doc.meta, function (_err: any, hash: any) {
             t.ifError(err)
             t.equal(hash, doc.hash)
             next()
@@ -66,81 +68,81 @@ test('populate non-array prev', function (t) {
     })()
 })
 
-test('in order', function (t) {
+test('in order', async function (t: any) {
     t.plan(10)
 
-    const expected = {}
-    expected.heads = [{ hash: hashes[3] }]
-    expected.tails = [{ hash: hashes[0] }]
+    const expected: any = {}
+    expected.heads = [{ hash: hashes[3]! }]
+    expected.tails = [{ hash: hashes[0]! }]
     expected.list = [
-        { hash: hashes[0], meta: { key: 'blorp' } },
+        { hash: hashes[0]!, meta: { key: 'blorp' } },
         {
-            hash: hashes[1],
+            hash: hashes[1]!,
             meta: {
                 key: 'blorp',
-                prev: { hash: hashes[0], key: 'blorp' }
+                prev: { hash: hashes[0]!, key: 'blorp' }
             }
         },
         {
-            hash: hashes[2],
+            hash: hashes[2]!,
             meta: {
                 key: 'blorp',
-                prev: { hash: hashes[0], key: 'blorp' }
+                prev: { hash: hashes[0]!, key: 'blorp' }
             }
         },
         {
-            hash: hashes[3],
+            hash: hashes[3]!,
             meta: {
                 key: 'blorp',
                 prev: [
-                    { hash: hashes[1], key: 'blorp' },
-                    { hash: hashes[2], key: 'blorp' }
+                    { hash: hashes[1]!, key: 'blorp' },
+                    { hash: hashes[2]!, key: 'blorp' }
                 ]
             }
         }
     ]
     expected.links = {}
-    expected.links[hashes[0]] = [
-        { key: 'blorp', hash: hashes[1] },
-        { key: 'blorp', hash: hashes[2] }
+    expected.links[hashes[0]!] = [
+        { key: 'blorp', hash: hashes[1]! },
+        { key: 'blorp', hash: hashes[2]! }
     ]
-    expected.links[hashes[1]] = [
-        { key: 'blorp', hash: hashes[3] }
+    expected.links[hashes[1]!] = [
+        { key: 'blorp', hash: hashes[3]! }
     ]
-    expected.links[hashes[2]] = [
-        { key: 'blorp', hash: hashes[3] }
+    expected.links[hashes[2]!] = [
+        { key: 'blorp', hash: hashes[3]! }
     ]
 
     check(t, fdb, expected)
-    fdb.createReadStream(hashes[0]).pipe(concat(function (body) {
+    fdb.createReadStream(hashes[0]!).pipe(concat(function (body: any) {
         t.equal(body.toString('utf8'), 'beep boop\n')
     }))
-    fdb.createReadStream(hashes[1]).pipe(concat(function (body) {
+    fdb.createReadStream(hashes[1]!).pipe(concat(function (body: any) {
         t.equal(body.toString('utf8'), 'BEEP BOOP\n')
     }))
-    fdb.createReadStream(hashes[2]).pipe(concat(function (body) {
+    fdb.createReadStream(hashes[2]!).pipe(concat(function (body: any) {
         t.equal(body.toString('utf8'), 'BeEp BoOp\n')
     }))
-    fdb.createReadStream(hashes[3]).pipe(concat(function (body) {
+    fdb.createReadStream(hashes[3]!).pipe(concat(function (body: any) {
         t.equal(body.toString('utf8'), 'BEEPITY BOOPITY\n')
     }))
 })
 
-function collect (cb) {
-    const rows = []
+function collect (cb: any) {
+    const rows: any[] = []
     return through.obj(write, end)
-    function write (row, enc, next) { rows.push(row); next() }
+    function write (row: any, _enc: any, next: any) { rows.push(row); next() }
     function end () { cb(rows) }
 }
 
-function check (t, fdb, expected) {
+function check (t: any, fdb: any, expected: any) {
     fdb.heads('blorp').pipe(collect(function (rows) {
         t.deepEqual(rows, sort(expected.heads), 'heads')
     }))
     fdb.tails('blorp').pipe(collect(function (rows) {
         t.deepEqual(rows, sort(expected.tails), 'tails')
     }))
-    Object.keys(expected.links).forEach(function (hash) {
+    Object.keys(expected.links).forEach(function (hash: any) {
         fdb.links(hash).pipe(collect(function (rows) {
             t.deepEqual(rows, sort(expected.links[hash]), 'links')
         }))
@@ -150,9 +152,9 @@ function check (t, fdb, expected) {
     }))
 }
 
-function sort (xs) {
+function sort (xs: any) {
     return xs.sort(cmp)
-    function cmp (a, b) {
+    function cmp (a: any, b: any) {
         if (a.hash !== undefined && a.hash < b.hash) return -1
         if (a.hash !== undefined && a.hash > b.hash) return 1
     }

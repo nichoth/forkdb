@@ -1,26 +1,27 @@
-const test = require('tape')
-const path = require('path')
-const level = require('level')
-const mkdirp = require('mkdirp')
-const concat = require('concat-stream')
+import { test } from '@substrate-system/tapzero'
+import path from 'node:path'
+import level from 'level'
+import { mkdirSync } from 'node:fs'
+import concat from 'concat-stream'
+import { tmpdir } from 'node:os'
+import ForkDB from '../src/index.js'
 
-const tmpdir = path.join(
-    require('osenv').tmpdir(),
+const testDir = path.join(
+    tmpdir(),
     'forkdb-test-' + Math.random()
 )
-mkdirp.sync(tmpdir)
+mkdirSync(testDir, { recursive: true })
 
-const db = level(path.join(tmpdir, 'db'))
-const forkdb = require('../')
-const fdb = forkdb(db, { dir: path.join(tmpdir, 'blob') })
+const db = level(path.join(testDir, 'db'))
+const forkdb = new ForkDB(db, { dir: path.join(testDir, 'blob') })
 
 const blob = Array(1000 * 20 + 1).join('A')
 
-test('fnmeta', function (t) {
+test('fnmeta', async function (t: any) {
     t.plan(3)
-    const w = fdb.createWriteStream(function (err, key) {
+    const w = forkdb.createWriteStream(function (_err: any, key: any) {
         t.ifError(err)
-        fdb.get(key, function (err, res) {
+        forkdb.get(key, function (_err: any, res) {
             t.ifError(err)
             t.deepEqual(res, {})
         })
@@ -28,11 +29,11 @@ test('fnmeta', function (t) {
     w.end(blob)
 })
 
-test('notmeta', function (t) {
+test('notmeta', async function (t: any) {
     t.plan(3)
-    const w = fdb.createWriteStream(null, function (err, key) {
+    const w = forkdb.createWriteStream(null, function (_err: any, key: any) {
         t.ifError(err)
-        fdb.get(key, function (err, res) {
+        forkdb.get(key, function (_err: any, res) {
             t.ifError(err)
             t.deepEqual(res, {})
         })
