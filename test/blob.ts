@@ -17,7 +17,7 @@ const fdb = new ForkDB(db, { dir: path.join(testDir, 'blob') })
 
 const blob = Array(1000 * 200 + 1).join('A')
 
-test('blob', async function (t: any) {
+test('blob', async function (t) {
     t.plan(2)
     const key = await new Promise<string>((resolve, reject) => {
         const w = fdb.createWriteStream({ key: 'blob' })
@@ -26,10 +26,15 @@ test('blob', async function (t: any) {
         w.end(blob)
     })
 
-    const body = await new Promise((resolve) => {
+    // First assertion: verify we got a valid key
+    t.ok(key, 'should get a valid key')
+
+    const body = await new Promise<Buffer>((resolve) => {
         fdb.createReadStream(key).pipe(concat(function (body: any) {
-            t.equal(body.toString('utf8'), blob)
             resolve(body)
         }))
     })
+
+    // Second assertion: verify the content matches
+    t.equal(body.toString('utf8'), blob)
 })

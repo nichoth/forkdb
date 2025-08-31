@@ -3,7 +3,6 @@ import path from 'node:path'
 import level from 'level'
 import { mkdirSync } from 'node:fs'
 import through from '../src/through.js'
-import concat from 'concat-stream'
 import { tmpdir } from 'node:os'
 import ForkDB from '../src/index.js'
 
@@ -53,19 +52,19 @@ const docs = [
     { hash: hashes[0]!, body: 'beep boop\n', meta: { key: 'blorp' } },
 ]
 
-test('populate future', async function (t: any) {
+test('populate future', async function (t) {
     t.plan(docs.length * 2)
     const docs_ = docs.slice();
 
     (function next () {
         if (docs_.length === 0) return
         const doc = docs_.shift()
-        const w = fdb.createWriteStream(doc.meta, function (_err: any, hash: any) {
-            t.ifError(err)
-            t.equal(doc.hash, hash)
+        const w = fdb.createWriteStream(doc!.meta, function (_err: any, hash: any) {
+            t.ifError(_err)
+            t.equal(doc!.hash, hash)
             next()
         })
-        w.end(doc.body)
+        w.end(doc!.body)
     })()
 })
 

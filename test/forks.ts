@@ -209,5 +209,6 @@ function sort (xs: any) {
     function cmp (a: any, b: any) {
         if (a.hash !== undefined && a.hash < b.hash) return -1
         if (a.hash !== undefined && a.hash > b.hash) return 1
+        return 0
     }
 }

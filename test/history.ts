@@ -2,8 +2,8 @@ import { test } from '@substrate-system/tapzero'
 import path from 'node:path'
 import level from 'level'
 import { mkdirSync } from 'node:fs'
-import through from '../src/through.js'
-import concat from 'concat-stream'
+
+
 import { tmpdir } from 'node:os'
 import ForkDB from '../src/index.js'
 
@@ -70,14 +70,14 @@ test('populate history', async function (t: any) {
 
 test('history', async function (t: any) {
     t.plan(6)
-    forkdb.history(hashes[0]!).pipe(collect(function (rows) {
-        t.deepEqual(mhashes(rows), [hashes[0]!], 'history 0')
+    forkdb.history(hashes[0]!).pipe(collect(function (rows: any[]) {
+        t.deepEqual(mhashes(rows!), [hashes[0]!], 'history 0')
     }))
-    forkdb.history(hashes[1]!).pipe(collect(function (rows) {
-        t.deepEqual(mhashes(rows), [hashes[1]!, hashes[0]!], 'history 1')
+    forkdb.history(hashes[1]!).pipe(collect(function (rows: any[]) {
+        t.deepEqual(mhashes(rows!), [hashes[1]!, hashes[0]!], 'history 1')
     }))
-    forkdb.history(hashes[2]!).pipe(collect(function (rows) {
-        t.deepEqual(mhashes(rows), [hashes[2]!, hashes[0]!], 'history 2')
+    forkdb.history(hashes[2]!).pipe(collect(function (rows: any[]) {
+        t.deepEqual(mhashes(rows!), [hashes[2]!, hashes[0]!], 'history 2')
     }))
 
     const h3 = forkdb.history(hashes[3]!)
@@ -87,12 +87,12 @@ test('history', async function (t: any) {
     ]
     h3.on('branch', function (b) {
         const ex = ex3.shift()
-        b.pipe(collect(function (rows) {
-            t.deepEqual(mhashes(rows), ex)
+        b.pipe(collect(function (rows: any[]) {
+            t.deepEqual(mhashes(rows!), ex)
         }))
     })
-    h3.pipe(collect(function (rows) {
-        t.deepEqual(mhashes(rows), [hashes[3]!])
+    h3.pipe(collect(function (rows: any[]) {
+        t.deepEqual(mhashes(rows!), [hashes[3]!])
     }))
 })
 

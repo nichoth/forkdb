@@ -2,8 +2,8 @@ import { test } from '@substrate-system/tapzero'
 import path from 'node:path'
 import level from 'level'
 import { mkdirSync } from 'node:fs'
-import through from '../src/through.js'
-import concat from 'concat-stream'
+
+
 import { tmpdir } from 'node:os'
 import ForkDB from '../src/index.js'
 
@@ -72,7 +72,7 @@ test('populate keys', async function (t: any) {
 
 test('keys', async function (t: any) {
     t.plan(1)
-    fdb.keys().pipe(collect(function (rows) {
+    fdb.keys().pipe(collect(function (rows: any[]) {
         t.deepEqual(rows, [
             { key: 'blorp' },
             { key: 'wooo' }

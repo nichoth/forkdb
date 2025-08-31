@@ -2,8 +2,8 @@ import { test } from '@substrate-system/tapzero'
 import path from 'node:path'
 import level from 'level'
 import { mkdirSync } from 'node:fs'
-import through from '../src/through.js'
-import concat from 'concat-stream'
+
+
 import ForkDB from '../src/index.js'
 import { tmpdir } from 'node:os'
 
@@ -196,18 +196,18 @@ function collect (cb: any) {
 }
 
 function check (t: any, fdb: any, expected: any) {
-    fdb.heads('blorp').pipe(collect(function (rows) {
+    fdb.heads('blorp').pipe(collect(function (rows: any[]) {
         t.deepEqual(rows, sort(expected.heads), 'heads')
     }))
-    fdb.tails('blorp').pipe(collect(function (rows) {
+    fdb.tails('blorp').pipe(collect(function (rows: any[]) {
         t.deepEqual(rows, sort(expected.tails), 'tails')
     }))
     Object.keys(expected.links).forEach(function (hash: any) {
-        fdb.links(hash).pipe(collect(function (rows) {
+        fdb.links(hash).pipe(collect(function (rows: any[]) {
             t.deepEqual(rows, sort(expected.links[hash]), 'links')
         }))
     })
-    fdb.list().pipe(collect(function (rows) {
+    fdb.list().pipe(collect(function (rows: any[]) {
         t.deepEqual(rows, sort(expected.list), 'list')
     }))
 }
