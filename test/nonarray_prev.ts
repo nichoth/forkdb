@@ -6,6 +6,15 @@ import { mkdirSync } from 'node:fs'
 
 import { tmpdir } from 'node:os'
 import ForkDB from '../src/index.js'
+import concat from 'concat-stream'
+import through from '../src/through.js'
+
+interface ExpectedData {
+    heads: Array<{ hash: string }>
+    tails: Array<{ hash: string }>
+    list: Array<{ hash: string; meta: any }>
+    links: Record<string, Array<{ key: string; hash: string }>>
+}
 
 const testDir = path.join(
     tmpdir(),
@@ -16,14 +25,14 @@ mkdirSync(testDir, { recursive: true })
 const db = level(path.join(testDir, 'db'))
 const fdb = new ForkDB(db, { dir: path.join(testDir, 'blob') })
 
-const hashes: string[] = [
+const hashes = [
     '9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0',
     '1ffcdc9a4e47ee447ec72f38744f1ddd6b200a86389895aa249c9fc49bc04289',
     'b705af981e52c0fbfe9845ac1ba6d2a4f75a4677f1b6264b3b358315afe8f202',
     '6d4aeea6772e7bfc715fb42d0679f3bf2ffab77afc50588fd0264694d11ebf51'
 ]
 
-test('populate non-array prev', async function (t: any) {
+test('populate non-array prev', async function (t) {
     const docs = [
         { hash: hashes[0]!, body: 'beep boop\n', meta: { key: 'blorp' } },
         {
@@ -59,19 +68,24 @@ test('populate non-array prev', async function (t: any) {
     (function next () {
         if (docs.length === 0) return
         const doc = docs.shift()
-        const w = fdb.createWriteStream(doc.meta, function (_err: any, hash: any) {
-            t.ifError(err)
+        const w = fdb.createWriteStream(doc.meta, function (_err, hash) {
+            t.ifError(_err)
             t.equal(hash, doc.hash)
             next()
         })
-        w.end(doc.body)
+        w.end(doc!.body)
     })()
 })
 
-test('in order', async function (t: any) {
+test('in order', async function (t) {
     t.plan(10)
 
-    const expected: any = {}
+    const expected: ExpectedData = {
+        heads: [],
+        tails: [],
+        list: [],
+        links: {}
+    }
     expected.heads = [{ hash: hashes[3]! }]
     expected.tails = [{ hash: hashes[0]! }]
     expected.list = [
@@ -114,40 +128,40 @@ test('in order', async function (t: any) {
     ]
 
     check(t, fdb, expected)
-    fdb.createReadStream(hashes[0]!).pipe(concat(function (body: any) {
+    fdb.createReadStream(hashes[0]!).pipe(concat(function (body) {
         t.equal(body.toString('utf8'), 'beep boop\n')
     }))
-    fdb.createReadStream(hashes[1]!).pipe(concat(function (body: any) {
+    fdb.createReadStream(hashes[1]!).pipe(concat(function (body) {
         t.equal(body.toString('utf8'), 'BEEP BOOP\n')
     }))
-    fdb.createReadStream(hashes[2]!).pipe(concat(function (body: any) {
+    fdb.createReadStream(hashes[2]!).pipe(concat(function (body) {
         t.equal(body.toString('utf8'), 'BeEp BoOp\n')
     }))
-    fdb.createReadStream(hashes[3]!).pipe(concat(function (body: any) {
+    fdb.createReadStream(hashes[3]!).pipe(concat(function (body) {
         t.equal(body.toString('utf8'), 'BEEPITY BOOPITY\n')
     }))
 })
 
-function collect (cb: any) {
+function collect (cb) {
     const rows: any[] = []
     return through.obj(write, end)
-    function write (row: any, _enc: any, next: any) { rows.push(row); next() }
+    function write (row, _enc, next) { rows.push(row); next() }
     function end () { cb(rows) }
 }
 
 function check (t: any, fdb: any, expected: any) {
-    fdb.heads('blorp').pipe(collect(function (rows: any[]) {
+    fdb.heads('blorp').pipe(collect(function (rows) {
         t.deepEqual(rows, sort(expected.heads), 'heads')
     }))
-    fdb.tails('blorp').pipe(collect(function (rows: any[]) {
+    fdb.tails('blorp').pipe(collect(function (rows) {
         t.deepEqual(rows, sort(expected.tails), 'tails')
     }))
-    Object.keys(expected.links).forEach(function (hash: any) {
-        fdb.links(hash).pipe(collect(function (rows: any[]) {
+    Object.keys(expected.links).forEach(function (hash) {
+        fdb.links(hash).pipe(collect(function (rows) {
             t.deepEqual(rows, sort(expected.links[hash]), 'links')
         }))
     })
-    fdb.list().pipe(collect(function (rows: any[]) {
+    fdb.list().pipe(collect(function (rows) {
         t.deepEqual(rows, sort(expected.list), 'list')
     }))
 }

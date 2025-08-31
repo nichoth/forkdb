@@ -15,7 +15,7 @@ mkdirSync(testDir, { recursive: true })
 const db = level(path.join(testDir, 'db'))
 const fdb = new ForkDB(db, { dir: path.join(testDir, 'blob') })
 
-const hashes: string[] = [
+const hashes = [
     '9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0',
     'fcbcbe4389433dd9652d279bb9044b8e570d7f033fab18189991354228a43e99',
     'c3122c908bf03bb8b36eaf3b46e27437e23827e6a341439974d5d38fb22fbdfc',
@@ -59,7 +59,7 @@ test('populate future', async function (t) {
     (function next () {
         if (docs_.length === 0) return
         const doc = docs_.shift()
-        const w = fdb.createWriteStream(doc!.meta, function (_err: any, hash: any) {
+        const w = fdb.createWriteStream(doc!.meta, function (_err, hash) {
             t.ifError(_err)
             t.equal(doc!.hash, hash)
             next()
@@ -68,7 +68,7 @@ test('populate future', async function (t) {
     })()
 })
 
-test('future', async function (t: any) {
+test('future', async function (t) {
     t.plan(9)
 
     const h0 = fdb.future(hashes[0]!)
@@ -80,7 +80,7 @@ test('future', async function (t: any) {
         [hashes[1]!, hashes[3]!]
     ]
     h0.on('branch', function (b) {
-        const ex = ex0.shift()
+        const ex = ex0.shift()!
         b.pipe(collect(function (rows) {
             t.deepEqual(mhashes(rows), ex, 'future 0 branch')
         }))
@@ -88,22 +88,22 @@ test('future', async function (t: any) {
 
     fdb.future(hashes[1]!).pipe(collect(function (rows) {
         t.deepEqual(mhashes(rows), [hashes[1]!, hashes[3]!], 'future 1')
-        t.deepEqual(mmetas(rows), [docs[0].meta, docs[1].meta])
+        t.deepEqual(mmetas(rows), [docs[0]!.meta, docs[1]!.meta])
     }))
     fdb.future(hashes[2]!).pipe(collect(function (rows) {
         t.deepEqual(mhashes(rows), [hashes[2]!, hashes[3]!], 'future 2')
-        t.deepEqual(mmetas(rows), [docs[2].meta, docs[1].meta])
+        t.deepEqual(mmetas(rows), [docs[2]!.meta, docs[1]!.meta])
     }))
     fdb.future(hashes[3]!).pipe(collect(function (rows) {
         t.deepEqual(mhashes(rows), [hashes[3]!], 'future 3')
-        t.deepEqual(mmetas(rows), [docs[1].meta])
+        t.deepEqual(mmetas(rows), [docs[1]!.meta])
     }))
 })
 
-function collect (cb: any) {
+function collect (cb) {
     const rows: any[] = []
     return through.obj(write, end)
-    function write (row: any, _enc: any, next: any) { rows.push(row); next() }
+    function write (row, _enc, next) { rows.push(row); next() }
     function end () { cb(rows) }
 }
 

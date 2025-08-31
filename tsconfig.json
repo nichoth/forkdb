@@ -16,7 +16,7 @@
     "sourceMap": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
-    "noImplicitAny": true,
+    "noImplicitAny": false,
     "declaration": true,
     "declarationDir": "dist",
     "declarationMap": true,

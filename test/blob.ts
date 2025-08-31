@@ -21,16 +21,16 @@ test('blob', async function (t) {
     t.plan(2)
     const key = await new Promise<string>((resolve, reject) => {
         const w = fdb.createWriteStream({ key: 'blob' })
-        w.on('complete', (hash: string) => resolve(hash))
-        w.on('error', (err: any) => reject(err))
+        w.on('complete', (hash) => resolve(hash))
+        w.on('error', (err) => reject(err))
         w.end(blob)
     })
 
-    // First assertion: verify we got a valid key
+    // First assertion: verify we get a valid key
     t.ok(key, 'should get a valid key')
 
     const body = await new Promise<Buffer>((resolve) => {
-        fdb.createReadStream(key).pipe(concat(function (body: any) {
+        fdb.createReadStream(key).pipe(concat(function (body) {
             resolve(body)
         }))
     })

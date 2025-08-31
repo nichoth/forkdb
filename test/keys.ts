@@ -6,6 +6,14 @@ import { mkdirSync } from 'node:fs'
 
 import { tmpdir } from 'node:os'
 import ForkDB from '../src/index.js'
+import through from '../src/through.js'
+
+interface ExpectedData {
+    heads: Array<{ hash: string }>
+    tails: Array<{ hash: string }>
+    list: Array<{ hash: string; meta: any }>
+    links: Record<string, Array<{ key: string; hash: string }>>
+}
 
 const testDir = path.join(
     tmpdir(),
@@ -16,7 +24,7 @@ mkdirSync(testDir, { recursive: true })
 const db = level(path.join(testDir, 'db'))
 const fdb = new ForkDB(db, { dir: path.join(testDir, 'blob') })
 
-const hashes: string[] = [
+const hashes = [
     '9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0',
     'fcbcbe4389433dd9652d279bb9044b8e570d7f033fab18189991354228a43e99',
     'c3122c908bf03bb8b36eaf3b46e27437e23827e6a341439974d5d38fb22fbdfc',
@@ -24,7 +32,7 @@ const hashes: string[] = [
     '3ba9e19284ddfeda5d675bf776a859629eed1c465f60147f763accb5b61bc02e'
 ]
 
-test('populate keys', async function (t: any) {
+test('populate keys', async function (t) {
     const docs = [
         { hash: hashes[0]!, body: 'beep boop\n', meta: { key: 'blorp' } },
         {
@@ -61,18 +69,23 @@ test('populate keys', async function (t: any) {
     (function next () {
         if (docs.length === 0) return
         const doc = docs.shift()
-        const w = fdb.createWriteStream(doc.meta, function (_err: any, hash: any) {
-            t.ifError(err)
-            t.equal(doc.hash, hash)
+        const w = fdb.createWriteStream(doc.meta, function (_err, hash) {
+            t.ifError(_err)
+            t.equal(doc!.hash, hash)
             next()
         })
-        w.end(doc.body)
+        w.end(doc!.body)
     })()
 })
 
-test('keys', async function (t: any) {
+test('keys', async function (t) {
     t.plan(1)
-    fdb.keys().pipe(collect(function (rows: any[]) {
+    fdb.keys().then(keys => {
+        const stream = new (require('stream').Readable)({ objectMode: true });
+        keys.forEach(key => stream.push(key));
+        stream.push(null);
+        return stream;
+    }).pipe(collect(function (rows) {
         t.deepEqual(rows, [
             { key: 'blorp' },
             { key: 'wooo' }
@@ -80,9 +93,9 @@ test('keys', async function (t: any) {
     }))
 })
 
-function collect (cb: any) {
+function collect (cb) {
     const rows: any[] = []
     return through.obj(write, end)
-    function write (row: any, _enc: any, next: any) { rows.push(row); next() }
+    function write (row, _enc, next) { rows.push(row); next() }
     function end () { cb(rows) }
 }
