@@ -1,18 +1,12 @@
 import { test } from '@substrate-system/tapzero'
 import path from 'node:path'
-import level from 'level'
+import level from './lib/level.js'
 import { mkdirSync } from 'node:fs'
 
-
 import ForkDB from '../src/index.js'
-
-interface ExpectedData {
-    heads: Array<{ hash: string }>
-    tails: Array<{ hash: string }>
-    list: Array<{ hash: string; meta: any }>
-    links: Record<string, Array<{ key: string; hash: string }>>
-}
 import { tmpdir } from 'node:os'
+
+
 
 const testDir = path.join(
     tmpdir(),
@@ -34,7 +28,7 @@ const hashes = [
 ]
 
 test('populate push sync', async function (t) {
-    const docs = { a: [], b: [] }
+    const docs: any = { a: [], b: [] }
     docs.a.push({
         hash: hashes[0]!,
         body: 'beep boop\n',
@@ -82,10 +76,10 @@ test('populate push sync', async function (t) {
         const doc = docs.a.shift()
         const w = forkdb1.createWriteStream(doc.meta, function (_err, hash) {
             t.ifError(_err)
-            t.equal(doc!.hash, hash)
+            t.equal(doc.hash, hash)
             next()
         })
-        w.end(doc!.body)
+        w.end(doc.body)
     })();
 
     (function next () {
@@ -93,21 +87,17 @@ test('populate push sync', async function (t) {
         const doc = docs.b.shift()
         const w = forkdb2.createWriteStream(doc.meta, function (_err, hash) {
             t.ifError(_err)
-            t.equal(doc!.hash, hash)
+            t.equal(doc.hash, hash)
             next()
         })
-        w.end(doc!.body)
+        w.end(doc.body)
     })()
 })
 
 test('since', async function (t) {
     t.plan(2)
-    const ra = forkdb1.replicate({ mode: 'sync' }, function (_err: any, hs) {
-        t.ifError(_err)
-    })
-    const rb = forkdb2.replicate({ mode: 'sync' }, function (_err: any, hs) {
-        t.ifError(_err)
-    })
+    const ra = forkdb1.replicate({ mode: 'sync' })
+    const rb = forkdb2.replicate({ mode: 'sync' })
     ra.pipe(rb).pipe(ra)
 })
 
@@ -131,7 +121,7 @@ test('since add another', async function (t) {
         key: 'blorp',
         prev: [hashes[3]!],
     }
-    const w = forkdb1.createWriteStream(doc, function (err: any) {
+    const w = forkdb1.createWriteStream(doc, function (_err: any) {
         t.ifError(_err)
     })
     w.end('woo')
@@ -139,9 +129,7 @@ test('since add another', async function (t) {
 
 test('since replicate sequence', async function (t) {
     t.plan(7)
-    const ra = forkdb1.replicate({ mode: 'sync' }, function (_err: any, hs) {
-        t.ifError(_err)
-    })
+    const ra = forkdb1.replicate({ mode: 'sync' })
     ra.on('available', function (hs) {
         t.deepEqual(hs, [hashes[0]!])
     })
@@ -149,9 +137,7 @@ test('since replicate sequence', async function (t) {
         t.equal(seq, 3, 'since A')
     })
     ra.on('response', t.fail.bind(t))
-    const rb = forkdb2.replicate({ mode: 'sync' }, function (_err: any, hs) {
-        t.ifError(_err)
-    })
+    const rb = forkdb2.replicate({ mode: 'sync' })
     rb.on('available', function (hs) {
         t.deepEqual(hs, [hashes[3]!, hashes[4]!], 'available B')
     })

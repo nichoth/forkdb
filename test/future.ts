@@ -1,6 +1,6 @@
 import { test } from '@substrate-system/tapzero'
 import path from 'node:path'
-import level from 'level'
+import level from './lib/level.js'
 import { mkdirSync } from 'node:fs'
 import through from '../src/through.js'
 import { tmpdir } from 'node:os'

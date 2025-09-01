@@ -1,19 +1,12 @@
 import { test } from '@substrate-system/tapzero'
 import path from 'node:path'
-import level from 'level'
+import level from './lib/level.js'
 import { mkdirSync } from 'node:fs'
-
 
 import { tmpdir } from 'node:os'
 import ForkDB from '../src/index.js'
-import through from '../src/through.js'
 
-interface ExpectedData {
-    heads: Array<{ hash: string }>
-    tails: Array<{ hash: string }>
-    list: Array<{ hash: string; meta: any }>
-    links: Record<string, Array<{ key: string; hash: string }>>
-}
+
 
 const testDir = path.join(
     tmpdir(),
@@ -69,33 +62,23 @@ test('populate keys', async function (t) {
     (function next () {
         if (docs.length === 0) return
         const doc = docs.shift()
+        if (!doc) return
         const w = fdb.createWriteStream(doc.meta, function (_err, hash) {
             t.ifError(_err)
-            t.equal(doc!.hash, hash)
+            t.equal(doc.hash, hash)
             next()
         })
-        w.end(doc!.body)
+        w.end(doc.body)
     })()
 })
 
 test('keys', async function (t) {
     t.plan(1)
-    fdb.keys().then(keys => {
-        const stream = new (require('stream').Readable)({ objectMode: true });
-        keys.forEach(key => stream.push(key));
-        stream.push(null);
-        return stream;
-    }).pipe(collect(function (rows) {
-        t.deepEqual(rows, [
-            { key: 'blorp' },
-            { key: 'wooo' }
-        ])
-    }))
+    const keys = await fdb.keys()
+    t.deepEqual(keys, [
+        'blorp',
+        'wooo'
+    ])
 })
 
-function collect (cb) {
-    const rows: any[] = []
-    return through.obj(write, end)
-    function write (row, _enc, next) { rows.push(row); next() }
-    function end () { cb(rows) }
-}
+

@@ -1,12 +1,11 @@
 import { test } from '@substrate-system/tapzero'
 import path from 'node:path'
-import level from 'level'
+import level from './lib/level.js'
 import { mkdirSync } from 'node:fs'
-
 
 import { tmpdir } from 'node:os'
 import ForkDB from '../src/index.js'
-import concat from 'concat-stream'
+import concat from './lib/concat-stream.js'
 import through from '../src/through.js'
 
 interface ExpectedData {
@@ -40,7 +39,7 @@ test('populate non-array prev', async function (t) {
             body: 'BEEP BOOP\n',
             meta: {
                 key: 'blorp',
-                prev: { hash: hashes[0]!, key: 'blorp' }
+                prev: [{ hash: hashes[0]!, key: 'blorp' }]
             }
         },
         {
@@ -48,7 +47,7 @@ test('populate non-array prev', async function (t) {
             body: 'BeEp BoOp\n',
             meta: {
                 key: 'blorp',
-                prev: { hash: hashes[0]!, key: 'blorp' }
+                prev: [{ hash: hashes[0]!, key: 'blorp' }]
             }
         },
         {
@@ -68,12 +67,13 @@ test('populate non-array prev', async function (t) {
     (function next () {
         if (docs.length === 0) return
         const doc = docs.shift()
+        if (!doc) return
         const w = fdb.createWriteStream(doc.meta, function (_err, hash) {
             t.ifError(_err)
             t.equal(hash, doc.hash)
             next()
         })
-        w.end(doc!.body)
+        w.end(doc.body)
     })()
 })
 
@@ -94,14 +94,14 @@ test('in order', async function (t) {
             hash: hashes[1]!,
             meta: {
                 key: 'blorp',
-                prev: { hash: hashes[0]!, key: 'blorp' }
+                prev: [{ hash: hashes[0]!, key: 'blorp' }]
             }
         },
         {
             hash: hashes[2]!,
             meta: {
                 key: 'blorp',
-                prev: { hash: hashes[0]!, key: 'blorp' }
+                prev: [{ hash: hashes[0]!, key: 'blorp' }]
             }
         },
         {
@@ -171,5 +171,6 @@ function sort (xs: any) {
     function cmp (a: any, b: any) {
         if (a.hash !== undefined && a.hash < b.hash) return -1
         if (a.hash !== undefined && a.hash > b.hash) return 1
+        return 0
     }
 }

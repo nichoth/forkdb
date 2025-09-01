@@ -1,11 +1,13 @@
 import defaults from 'levelup-defaults'
-import { encode } from 'bytewise'
+import bytewise from 'bytewise'
 import through from './through.js'
 import readonly from 'read-only-stream'
 import wrap from 'level-option-wrap'
 import { EventEmitter } from 'events'
 import type { Readable } from 'stream'
 import { defined } from './index.js'
+
+const { encode } = bytewise
 
 // Type definitions
 export interface FWDBOptions {

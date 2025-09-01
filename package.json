@@ -22,7 +22,10 @@
   ],
   "scripts": {
     "lint": "eslint \"./**/*.{ts,js}\"",
-    "test": "esbuild test/index.ts --platform=node --format=esm --keep-names --bundle | node --input-type=module | tap-spec",
+    "//test": "esbuild test/index.ts --platform=node --format=esm --keep-names | node --input-type=module | tap-spec",
+    "test-compile": "tsc src/*.ts --target ES2020 --module ES2020 --moduleResolution node --outDir src --allowSyntheticDefaultImports --esModuleInterop",
+    "test-run": "npx ts-node --esm --project tsconfig.test.json test/index.ts",
+    "test": "npm run test-compile && npm run test-run",
     "build-esm": "esbuild src/*.ts --format=esm --metafile=dist/meta.json --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --sourcemap && tsc --emitDeclarationOnly --project tsconfig.build.json --outDir dist",
     "build": "mkdir -p ./dist && rm -rf ./dist/* && npm run build-esm",
     "toc": "markdown-toc --maxdepth 3 -i README.md",
@@ -63,6 +66,7 @@
     "level": "^10.0.0",
     "markdown-toc": "^1.2.0",
     "tap-spec": "^5.0.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   },
   "keywords": [

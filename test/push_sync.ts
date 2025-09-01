@@ -1,18 +1,17 @@
 import { test } from '@substrate-system/tapzero'
 import path from 'node:path'
-import level from 'level'
+import level from './lib/level.js'
 import { mkdirSync } from 'node:fs'
 
-
 import ForkDB from '../src/index.js'
-
-interface ExpectedData {
-    heads: Array<{ hash: string }>
-    tails: Array<{ hash: string }>
-    list: Array<{ hash: string; meta: any }>
-    links: Record<string, Array<{ key: string; hash: string }>>
-}
 import { tmpdir } from 'node:os'
+
+// interface ExpectedData {
+//     heads: Array<{ hash: string }>
+//     tails: Array<{ hash: string }>
+//     list: Array<{ hash: string; meta: any }>
+//     links: Record<string, Array<{ key: string; hash: string }>>
+// }
 
 const testDir = path.join(
     tmpdir(),
@@ -32,8 +31,18 @@ const hashes = [
     'e3bd9d14b8c298e57dbbb10235306bd46d12ebaeccd067dc9cdf7ed25b10a96d'
 ]
 
+type Doc = {
+    hash: string
+    body: string
+    meta: any
+}
+
 test('populate push sync', async function (t) {
-    const docs = { a: [], b: [] }
+    const docs:{
+        a:Doc[],
+        b:Doc[],
+    } = { a: [], b: [] }
+
     docs.a.push({
         hash: hashes[0]!,
         body: 'beep boop\n',
@@ -78,7 +87,7 @@ test('populate push sync', async function (t) {
 
     (function next () {
         if (docs.a.length === 0) return
-        const doc = docs.a.shift()
+        const doc = docs.a.shift()!
         const w = forkdb1.createWriteStream(doc.meta, function (_err, hash) {
             t.ifError(_err)
             t.equal(doc!.hash, hash)
@@ -89,7 +98,7 @@ test('populate push sync', async function (t) {
 
     (function next () {
         if (docs.b.length === 0) return
-        const doc = docs.b.shift()
+        const doc = docs.b.shift()!
         const w = forkdb2.createWriteStream(doc.meta, function (_err, hash) {
             t.ifError(_err)
             t.equal(doc!.hash, hash)
@@ -101,12 +110,8 @@ test('populate push sync', async function (t) {
 
 test('push sync', async function (t) {
     t.plan(2)
-    const ra = forkdb1.replicate({ mode: 'push' }, function (_err: any, hs) {
-        t.ifError(_err)
-    })
-    const rb = forkdb2.replicate({ mode: 'sync' }, function (_err: any, hs) {
-        t.ifError(_err)
-    })
+    const ra = forkdb1.replicate({ mode: 'push' })
+    const rb = forkdb2.replicate({ mode: 'sync' })
     ra.pipe(rb).pipe(ra)
 })
 

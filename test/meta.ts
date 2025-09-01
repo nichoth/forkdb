@@ -1,17 +1,12 @@
 import { test } from '@substrate-system/tapzero'
 import path from 'node:path'
-import level from 'level'
+import level from './lib/level.js'
 import { mkdirSync } from 'node:fs'
 
 import { tmpdir } from 'node:os'
 import ForkDB from '../src/index.js'
 
-interface ExpectedData {
-    heads: Array<{ hash: string }>
-    tails: Array<{ hash: string }>
-    list: Array<{ hash: string; meta: any }>
-    links: Record<string, Array<{ key: string; hash: string }>>
-}
+
 
 const testDir = path.join(
     tmpdir(),
@@ -26,12 +21,11 @@ const blob = Array(1000 * 20 + 1).join('A')
 
 test('meta', async function (t) {
     t.plan(3)
-    const w = forkdb.createWriteStream({ x: 555 }, function (_err, key) {
+    const w = forkdb.createWriteStream({ key: 'meta', x: 555 }, function (_err, key) {
         t.ifError(_err)
-        forkdb.get(key, function (_err: any, res) {
-            t.ifError(_err)
-            t.deepEqual(res, { x: 555 })
-        })
+        forkdb.get(key).then(res => {
+            t.deepEqual(res, { key: 'meta', x: 555 })
+        }).catch(err => t.fail(err))
     })
     w.end(blob)
 })

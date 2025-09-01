@@ -1,19 +1,13 @@
 import { test } from '@substrate-system/tapzero'
 import path from 'node:path'
-import level from 'level'
+import level from './lib/level.js'
 import { mkdirSync } from 'node:fs'
-
 
 import { tmpdir } from 'node:os'
 import ForkDB from '../src/index.js'
 import through from '../src/through.js'
 
-interface ExpectedData {
-    heads: Array<{ hash: string }>
-    tails: Array<{ hash: string }>
-    list: Array<{ hash: string; meta: any }>
-    links: Record<string, Array<{ key: string; hash: string }>>
-}
+
 
 const testDir = path.join(
     tmpdir(),
@@ -67,12 +61,13 @@ test('populate history', async function (t) {
     (function next () {
         if (docs.length === 0) return
         const doc = docs.shift()
+        if (!doc) return
         const w = forkdb.createWriteStream(doc.meta, function (_err, hash) {
             t.ifError(_err)
-            t.equal(doc!.hash, hash)
+            t.equal(doc.hash, hash)
             next()
         })
-        w.end(doc!.body)
+        w.end(doc.body)
     })()
 })
 

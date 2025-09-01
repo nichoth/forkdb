@@ -1,11 +1,10 @@
 import { test } from '@substrate-system/tapzero'
 import path from 'node:path'
-import level from 'level'
+import level from './lib/level.js'
 import { mkdirSync } from 'node:fs'
 
-
 import ForkDB from '../src/index.js'
-import concat from 'concat-stream'
+import concat from './lib/concat-stream.js'
 import through from '../src/through.js'
 
 interface ExpectedData {
@@ -15,6 +14,8 @@ interface ExpectedData {
     links: Record<string, Array<{ key: string; hash: string }>>
 }
 import { tmpdir } from 'node:os'
+
+
 
 const testDir = path.join(
     tmpdir(),
@@ -35,7 +36,7 @@ const hashes = [
 ]
 
 test('populate replicate', async function (t) {
-    const docs = { a: [], b: [] }
+    const docs: any = { a: [], b: [] }
     docs.a.push({
         hash: hashes[0]!,
         body: 'beep boop\n',
@@ -83,10 +84,10 @@ test('populate replicate', async function (t) {
         const doc = docs.a.shift()
         const w = forkdb1.createWriteStream(doc.meta, function (_err, hash) {
             t.ifError(_err)
-            t.equal(doc!.hash, hash)
+            t.equal(doc.hash, hash)
             next()
         })
-        w.end(doc!.body)
+        w.end(doc.body)
     })();
 
     (function next () {
@@ -94,10 +95,10 @@ test('populate replicate', async function (t) {
         const doc = docs.b.shift()
         const w = forkdb2.createWriteStream(doc.meta, function (_err, hash) {
             t.ifError(_err)
-            t.equal(doc!.hash, hash)
+            t.equal(doc.hash, hash)
             next()
         })
-        w.end(doc!.body)
+        w.end(doc.body)
     })()
 })
 
@@ -231,5 +232,6 @@ function sort (xs: any) {
     function cmp (a: any, b: any) {
         if (a.hash !== undefined && a.hash < b.hash) return -1
         if (a.hash !== undefined && a.hash > b.hash) return 1
+            return 0
     }
 }

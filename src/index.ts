@@ -1,8 +1,7 @@
 import blob from 'content-addressable-blob-store'
 import wrap from 'level-option-wrap'
-import FWDB from './fwdb.js'
 import exchange from 'hash-exchange'
-import { decode } from 'bytewise'
+import bytewise from 'bytewise'
 import has from 'has'
 import stringify from 'json-stable-stringify'
 import uniq from 'uniq'
@@ -13,6 +12,7 @@ import writeonly from 'write-only-stream'
 import duplexer from 'duplexer2'
 import { EventEmitter } from 'events'
 import { type WriteStream } from 'node:fs'
+import FWDB from './fwdb.js'
 import type {
     Meta,
     ForkDBOptions,
@@ -23,6 +23,8 @@ import type {
     LinksEntry,
     HeadsEntry
 } from './types.js'
+
+const { decode } = bytewise
 
 // --- Helper functions ---
 function getPrev (meta: Meta | null): string[] {
