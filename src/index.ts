@@ -655,7 +655,8 @@ export default class ForkDB extends EventEmitter {
     }
 
     async keys (opts: any = {}): Promise<string[]> {
-        return await this._fwdb.keys(opts)
+        const keysEntries = await this._fwdb.keys(opts)
+        return keysEntries.map(entry => entry.key)
     }
 
     tails (key: string, opts: any = {}): ThenableStream {
