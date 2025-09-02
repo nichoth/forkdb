@@ -172,7 +172,7 @@ export default class FWDB extends EventEmitter {
         }
     }
 
-    async heads (key: string, opts: any = {}): Promise<HeadsEntry[]> {
+    async _headsAsync (key: string, opts: any = {}): Promise<HeadsEntry[]> {
         try {
             const results: HeadsEntry[] = []
             const iterator = this.db.iterator(wrap(opts, {
@@ -190,7 +190,16 @@ export default class FWDB extends EventEmitter {
         }
     }
 
-    async links (hash: string, opts: any = {}): Promise<LinksEntry[]> {
+    // Callback-based version for backward compatibility
+    heads (key: string, opts: any, cb: (err: any, result: HeadsEntry[]) => void): void {
+        this._headsAsync(key, opts).then((result) => {
+            cb(null, result)
+        }).catch((err) => {
+            cb(err, [])
+        })
+    }
+
+    async _linksAsync (hash: string, opts: any = {}): Promise<LinksEntry[]> {
         try {
             const results: LinksEntry[] = []
             const iterator = this.db.iterator(wrap(opts, {
@@ -206,6 +215,15 @@ export default class FWDB extends EventEmitter {
         } catch (err) {
             throw err
         }
+    }
+
+    // Callback-based version for backward compatibility
+    links (hash: string, opts: any, cb: (err: any, result: LinksEntry[]) => void): void {
+        this._linksAsync(hash, opts).then((result) => {
+            cb(null, result)
+        }).catch((err) => {
+            cb(err, [])
+        })
     }
 
     async keys (opts: any = {}): Promise<KeysEntry[]> {

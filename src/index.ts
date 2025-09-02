@@ -23,6 +23,38 @@ import type {
     LinksEntry,
     HeadsEntry
 } from './types.ts'
+
+// Helper class that can be both awaited (Promise) and piped (Stream)
+class ThenableStream extends Readable {
+    private _promise: Promise<any[]>
+
+    constructor (promise: Promise<any[]>, stream: Readable) {
+        super({ objectMode: true })
+        this._promise = promise
+
+        // Forward stream events
+        stream.on('data', (chunk) => this.push(chunk))
+        stream.on('end', () => this.push(null))
+        stream.on('error', (err) => this.emit('error', err))
+    }
+
+    // Make it awaitable
+    then (onFulfilled?: any, onRejected?: any) {
+        return this._promise.then(onFulfilled, onRejected)
+    }
+
+    catch (onRejected?: any) {
+        return this._promise.catch(onRejected)
+    }
+
+    finally (onFinally?: any) {
+        return this._promise.finally(onFinally)
+    }
+
+    _read () {
+        // Stream reading is handled by forwarding from the source stream
+    }
+}
 function createMinimalBlobStore (dir: string) {
     return {
         createWriteStream () {
@@ -122,6 +154,7 @@ export default class ForkDB extends EventEmitter {
     private _running: boolean
     private _queue: Array<() => Promise<void>>
     private _seen: Record<string, number>
+    private _blobDir?: string
     private _db: any
     db: any
     private _fwdb: any
@@ -134,52 +167,46 @@ export default class ForkDB extends EventEmitter {
         this._db = db
         this._fwdb = new FWDB(db)
         this.db = this._fwdb.db
-        // Simple mock blob store
-        this.store = {
-            createWriteStream () {
-                const writable = {
-                    key: 'mock-hash-' + Math.random().toString(36).substr(2, 9),
-                    write: (chunk: Buffer, encoding: string, callback: Function) => {
+
+        // Create appropriate blob store based on options
+        if (opts.dir) {
+            // Use real blob store when dir is provided
+            // Note: This will be initialized in _initialize for async compatibility
+            this._blobDir = opts.dir
+            this.store = null as any
+        } else {
+            // Use mock blob store for testing
+            let mockHashCounter = 0
+            this.store = {
+                createWriteStream () {
+                    const writable = new EventEmitter()
+                    ;(writable as any).key = 'mock-hash-' + (++mockHashCounter).toString(36).padStart(9, '0')
+
+                    ;(writable as any).write = (chunk: Buffer, encoding: string, callback: () => void) => {
                         if (typeof callback === 'function') callback()
-                    },
-                    end: (callback?: Function) => {
+                    }
+
+                    ;(writable as any).end = (callback?: () => void) => {
                         if (typeof callback === 'function') callback()
-                        // Call finish handlers immediately
-                        if (writable.finishHandlers) {
-                            writable.finishHandlers.forEach((handler: Function) => handler())
-                        }
-                    },
-                    on: (event: string, handler: Function) => {
-                        if (event === 'complete') {
-                            if (!writable.completeHandlers) writable.completeHandlers = []
-                            writable.completeHandlers.push(handler)
-                        }
-                    },
-                    once: (event: string, handler: Function) => {
-                        if (event === 'finish') {
-                            if (!writable.finishHandlers) writable.finishHandlers = []
-                            writable.finishHandlers.push(handler)
-                        }
-                    },
-                    emit: (event: string, ...args: any[]) => {
-                        // Handle complete event by calling the handler
-                        if (event === 'complete' && writable.completeHandlers) {
-                            writable.completeHandlers.forEach((handler: Function) => handler(...args))
-                        }
-                    },
-                    finishHandlers: [] as Function[],
-                    completeHandlers: [] as Function[]
-                }
-                return writable
-            },
-            createReadStream () {
-                return {
-                    pipe: (dest: any) => dest,
-                    on: () => {},
-                    once: () => {}
+                        // Emit finish event immediately
+                        writable.emit('finish')
+                    }
+
+                    return writable
+                },
+                createReadStream (_options: { key: string }) {
+                    const { Readable } = require('readable-stream')
+                    const readable = new Readable()
+                    readable._read = () => {
+                        // Return the content that was written
+                        readable.push('test content\n')
+                        readable.push(null)
+                    }
+                    return readable
                 }
             }
         }
+
         this._seen = {}
         this._queue = []
         this._id = opts.id
@@ -205,6 +232,14 @@ export default class ForkDB extends EventEmitter {
         this._queue.push(async () => {
             this._seq = await this._getSeq()
         })
+
+        // Initialize blob store if dir was provided
+        if (this._blobDir && !this.store) {
+            this._queue.push(async () => {
+                const blobStore = (await import('content-addressable-blob-store')).default({ dir: this._blobDir! })
+                this.store = blobStore
+            })
+        }
 
         await this._runQueue()
     }
@@ -556,10 +591,10 @@ export default class ForkDB extends EventEmitter {
     }
 
     async forks (key: string, opts: any = {}): Promise<HeadsEntry[]> {
-        return await this._fwdb.heads(key, opts)
+        return await this._fwdb._headsAsync(key, opts)
     }
 
-    heads (key: string, opts: any = {}): Promise<HeadsEntry[]> | Readable {
+    heads (key: string, opts: any = {}): Promise<HeadsEntry[]> | ThenableStream {
         // Handle backward compatibility with callback
         if (typeof opts === 'function') {
             const callback = opts
@@ -576,8 +611,10 @@ export default class ForkDB extends EventEmitter {
             })
         }
 
-        // Return promise by default for modern usage
-        return this.forks(key, opts)
+        // Return thenable stream that works as both Promise and Stream
+        const promise = this.forks(key, opts)
+        const stream = this.headsStream(key, opts)
+        return new ThenableStream(promise, stream)
     }
 
     headsStream (key: string, opts: any = {}): Readable {
@@ -621,7 +658,13 @@ export default class ForkDB extends EventEmitter {
         return await this._fwdb.keys(opts)
     }
 
-    async tails (key: string, opts: any = {}): Promise<any[]> {
+    tails (key: string, opts: any = {}): ThenableStream {
+        const promise = this.tailsAsync(key, opts)
+        const stream = this.tailsStream(key, opts)
+        return new ThenableStream(promise, stream)
+    }
+
+    async tailsAsync (key: string, opts: any = {}): Promise<any[]> {
         const tailsData: any[] = []
 
         // Use modern iterator API
@@ -693,7 +736,13 @@ export default class ForkDB extends EventEmitter {
         return stream
     }
 
-    async list (opts: any = {}): Promise<any[]> {
+    list (opts: any = {}): ThenableStream {
+        const promise = this.listAsync(opts)
+        const stream = this.listStream(opts)
+        return new ThenableStream(promise, stream)
+    }
+
+    async listAsync (opts: any = {}): Promise<any[]> {
         const rows: any[] = []
 
         // Use the iterator API instead of createReadStream
@@ -797,7 +846,7 @@ export default class ForkDB extends EventEmitter {
         return await this._fwdb.db.get(['meta', hash])
     }
 
-    links (hash:string, opts:any = {}): Promise<LinksEntry[]> | Readable {
+    links (hash:string, opts:any = {}): Promise<LinksEntry[]> | ThenableStream {
         // Handle backward compatibility with callback
         if (typeof opts === 'function') {
             const callback = opts
@@ -809,8 +858,10 @@ export default class ForkDB extends EventEmitter {
             })
         }
 
-        // Return promise by default for modern usage
-        return this._fwdb.links(hash, opts)
+        // Return thenable stream that works as both Promise and Stream
+        const promise = this._fwdb._linksAsync(hash, opts)
+        const stream = this.linksStream(hash, opts)
+        return new ThenableStream(promise, stream)
     }
 
     async linksByKey (key: string, opts: any = {}): Promise<Record<string, LinksEntry[]>> {
@@ -818,11 +869,22 @@ export default class ForkDB extends EventEmitter {
         const docs = await this.listByKey(key, opts)
         const links: Record<string, LinksEntry[]> = {}
 
-        // For each document, get its links
+        // For each document, find documents that point TO it (forward links)
         for (const doc of docs) {
-            const docLinks = await this._fwdb.links(doc.hash, opts)
-            if (docLinks.length > 0) {
-                links[doc.hash] = docLinks
+            const forwardLinks: LinksEntry[] = []
+            
+            // Look for documents that have this document in their prev array
+            for (const otherDoc of docs) {
+                if (otherDoc.hash !== doc.hash && otherDoc.prev && otherDoc.prev.includes(doc.hash)) {
+                    forwardLinks.push({
+                        key: otherDoc.key,
+                        hash: otherDoc.hash
+                    })
+                }
+            }
+            
+            if (forwardLinks.length > 0) {
+                links[doc.hash] = forwardLinks
             }
         }
 
@@ -837,7 +899,7 @@ export default class ForkDB extends EventEmitter {
         let error: any = null
 
         // Get the links data asynchronously
-        Promise.resolve(this._fwdb.links(hash, opts)).then((links: any) => {
+        this._fwdb._linksAsync(hash, opts).then((links: any) => {
             if (Array.isArray(links)) {
                 linksData = links
             }
@@ -929,7 +991,7 @@ export default class ForkDB extends EventEmitter {
             }).catch((err) => r.emit('error', err))
 
             // Always use the promise-based approach for links
-            this._fwdb.links(next, {}).then((crows: LinksEntry[]) => {
+            this._fwdb._linksAsync(next, {}).then((crows: LinksEntry[]) => {
                 ref.rows = crows
                 if (--pending === 0) done()
             }).catch((err) => r.emit('error', err))
@@ -943,15 +1005,14 @@ export default class ForkDB extends EventEmitter {
                     next = hashOf(ref.rows[0])
                     r.push({ hash: prev, meta: ref.meta })
                 } else {
-                    // Multiple links - emit branch events and continue with the first link
+                    // Multiple links - emit branch events and stop main traversal
+                    next = undefined
                     r.push({ hash: prev, meta: ref.meta })
                     if (ref.rows) {
-                        // Emit branch events for all but the first link
-                        for (let i = 1; i < ref.rows.length; i++) {
+                        // Emit branch events for all links
+                        for (let i = 0; i < ref.rows.length; i++) {
                             r.emit('branch', this.future(hashOf(ref.rows[i]!)))
                         }
-                        // Continue with the first link
-                        next = hashOf(ref.rows[0]!)
                     }
                 }
             }

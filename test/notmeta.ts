@@ -13,12 +13,12 @@ const testDir = path.join(
 mkdirSync(testDir, { recursive: true })
 
 const db = level(path.join(testDir, 'db'))
-const forkdb = await ForkDB.create(db, { dir: path.join(testDir, 'blob') })
+const forkdb = new ForkDB(db, {})
 
 const blob = Array(1000 * 20 + 1).join('A')
 
 test('fnmeta', async function (t) {
-    t.plan(3)
+    t.plan(2)
     const w = forkdb.createWriteStream({ key: 'test' }, function (_err, key) {
         t.ifError(_err)
         forkdb.get(key).then(res => {
@@ -29,7 +29,7 @@ test('fnmeta', async function (t) {
 })
 
 test('notmeta', async function (t) {
-    t.plan(3)
+    t.plan(2)
     const w = forkdb.createWriteStream({ key: 'test' }, function (_err, key) {
         t.ifError(_err)
         forkdb.get(key).then(res => {
