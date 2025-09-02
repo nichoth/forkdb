@@ -4,9 +4,9 @@ import level from './lib/level.js'
 import { mkdirSync } from 'node:fs'
 
 import { tmpdir } from 'node:os'
-import ForkDB from '../src/index.js'
+import ForkDB from '../src/index.ts'
 import concat from './lib/concat-stream.js'
-import through from '../src/through.js'
+import through from '../src/through.ts'
 
 interface ExpectedData {
     heads: Array<{ hash: string }>
@@ -24,7 +24,7 @@ const testDir = path.join(
 mkdirSync(testDir, { recursive: true })
 
 const db = level(path.join(testDir, 'db'))
-const fdb = new ForkDB(db, { dir: path.join(testDir, 'blob') })
+const fdb = await ForkDB.create(db, { dir: path.join(testDir, 'blob') })
 
 const hashes = [
     '9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0',
@@ -129,7 +129,7 @@ test('in order', async function (t) {
         { key: 'blorp', hash: hashes[3]! }
     ]
 
-    check(t, fdb, expected)
+    await check(t, fdb, expected)
     fdb.createReadStream(hashes[0]!).pipe(concat(function (body) {
         t.equal(body.toString('utf8'), 'beep boop\n')
     }))
@@ -151,21 +151,20 @@ function collect (cb) {
     function end () { cb(rows) }
 }
 
-function check (t: any, fdb: any, expected: any) {
-    fdb.heads('blorp').pipe(collect(function (rows) {
-        t.deepEqual(rows, sort(expected.heads), 'heads')
-    }))
-    fdb.tails('blorp').pipe(collect(function (rows) {
-        t.deepEqual(rows, sort(expected.tails), 'tails')
-    }))
-    Object.keys(expected.links).forEach(function (hash) {
-        fdb.links(hash).pipe(collect(function (rows) {
-            t.deepEqual(rows, sort(expected.links[hash]), 'links')
-        }))
-    })
-    fdb.list().pipe(collect(function (rows) {
-        t.deepEqual(rows, sort(expected.list), 'list')
-    }))
+async function check (t: any, fdb: any, expected: any) {
+    const heads = await fdb.heads('blorp')
+    t.deepEqual(sort(heads), sort(expected.heads), 'heads')
+
+    const tails = await fdb.tails('blorp')
+    t.deepEqual(sort(tails), sort(expected.tails), 'tails')
+
+    for (const hash of Object.keys(expected.links)) {
+        const links = await fdb.links(hash)
+        t.deepEqual(sort(links), sort(expected.links[hash]), 'links')
+    }
+
+    const list = await fdb.list()
+    t.deepEqual(sort(list), sort(expected.list), 'list')
 }
 
 function sort (xs: any) {

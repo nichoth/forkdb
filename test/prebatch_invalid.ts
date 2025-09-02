@@ -4,7 +4,7 @@ import level from './lib/level.js'
 import { mkdirSync } from 'node:fs'
 
 import { tmpdir } from 'node:os'
-import ForkDB from '../src/index.js'
+import ForkDB from '../src/index.ts'
 
 
 
@@ -15,7 +15,7 @@ const testDir = path.join(
 mkdirSync(testDir, { recursive: true })
 
 const db = level(path.join(testDir, 'db'))
-const forkdb = new ForkDB(db, { dir: path.join(testDir, 'blob') })
+const forkdb = await ForkDB.create(db, { dir: path.join(testDir, 'blob') })
 
 test('prebatch invalid', async function (t) {
     const fdb = forkdb

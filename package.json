@@ -23,7 +23,7 @@
   "scripts": {
     "lint": "eslint \"./**/*.{ts,js}\"",
     "//test": "esbuild test/index.ts --platform=node --format=esm --keep-names | node --input-type=module | tap-spec",
-    "test-compile": "tsc src/*.ts --target ES2020 --module ES2020 --moduleResolution node --outDir src --allowSyntheticDefaultImports --esModuleInterop",
+    "test-compile": "echo 'No compilation needed'",
     "test-run": "npx ts-node --esm --project tsconfig.test.json test/index.ts",
     "test": "npm run test-compile && npm run test-run",
     "build-esm": "esbuild src/*.ts --format=esm --metafile=dist/meta.json --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --sourcemap && tsc --emitDeclarationOnly --project tsconfig.build.json --outDir dist",
@@ -63,7 +63,7 @@
     "esbuild": "^0.25.5",
     "eslint": "^8.57.0",
     "eslint-config-standard": "^17.1.0",
-    "level": "^10.0.0",
+    "level": "^9.0.0",
     "markdown-toc": "^1.2.0",
     "tap-spec": "^5.0.0",
     "ts-node": "^10.9.2",

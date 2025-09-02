@@ -4,8 +4,8 @@ import level from './lib/level.js'
 import { mkdirSync } from 'node:fs'
 
 import { tmpdir } from 'node:os'
-import ForkDB from '../src/index.js'
-import through from '../src/through.js'
+import ForkDB from '../src/index.ts'
+import through from '../src/through.ts'
 
 
 
@@ -16,7 +16,7 @@ const testDir = path.join(
 mkdirSync(testDir, { recursive: true })
 
 const db = level(path.join(testDir, 'db'))
-const forkdb = new ForkDB(db, { dir: path.join(testDir, 'blob') })
+const forkdb = await ForkDB.create(db, { dir: path.join(testDir, 'blob') })
 
 const hashes = [
     '9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0',

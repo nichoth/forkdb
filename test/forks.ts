@@ -4,7 +4,7 @@ import level from './lib/level.js'
 import { mkdirSync } from 'node:fs'
 import concat from './lib/concat-stream.js'
 import { tmpdir } from 'node:os'
-import ForkDB from '../src/index.js'
+import ForkDB from '../src/index.ts'
 
 interface ExpectedData {
     heads: Array<{ hash: string }>
@@ -20,7 +20,7 @@ const testDir = path.join(
 mkdirSync(testDir, { recursive: true })
 
 const db = level(path.join(testDir, 'db'))
-const fdb = new ForkDB(db, { dir: path.join(testDir, 'blob') })
+const fdb = await ForkDB.create(db, { dir: path.join(testDir, 'blob') })
 
 const hashes = [
     '9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0',
@@ -75,10 +75,10 @@ test('second doc', async function (t) {
         key: 'blorp',
         prev: [hashes[0]!]
     }, onfinish)
-    function onfinish (_err: any, key: any) {
+    async function onfinish (_err: any, key: any) {
         t.ifError(_err)
         t.equal(key, hashes[1]!)
-        check(t, fdb, expected)
+        await check(t, fdb, expected)
         fdb.createReadStream(hashes[0]!).pipe(concat(function (body) {
             t.equal(body.toString('utf8'), 'beep boop\n')
         }))
@@ -130,10 +130,10 @@ test('third doc (conflict)', async function (t) {
         key: 'blorp',
         prev: [hashes[0]!]
     }, onfinish)
-    function onfinish (_err: any, key: any) {
+    async function onfinish (_err: any, key: any) {
         t.ifError(_err)
         t.equal(key, hashes[2]!)
-        check(t, fdb, expected)
+        await check(t, fdb, expected)
         fdb.createReadStream(hashes[0]!).pipe(concat(function (body) {
             t.equal(body.toString('utf8'), 'beep boop\n')
         }))

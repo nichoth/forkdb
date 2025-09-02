@@ -4,7 +4,7 @@ import level from './lib/level.js'
 import { mkdirSync } from 'node:fs'
 import concat from './lib/concat-stream.js'
 import { tmpdir } from 'node:os'
-import ForkDB from '../src/index.js'
+import ForkDB from '../src/index.ts'
 
 const testDir = path.join(
     tmpdir(),
@@ -13,7 +13,7 @@ const testDir = path.join(
 mkdirSync(testDir, { recursive: true })
 
 const db = level(path.join(testDir, 'db'))
-const fdb = new ForkDB(db, { dir: path.join(testDir, 'blob') })
+const fdb = await ForkDB.create(db, { dir: path.join(testDir, 'blob') })
 
 const blob = Array(1000 * 200 + 1).join('A')
 

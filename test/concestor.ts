@@ -5,7 +5,7 @@ import { mkdirSync } from 'node:fs'
 
 import { tmpdir } from 'node:os'
 
-import ForkDB from '../src/index.js'
+import ForkDB from '../src/index.ts'
 
 const testDir = path.join(
     tmpdir(),
@@ -22,13 +22,22 @@ const hashes = [
     'e3bd9d14b8c298e57dbbb10235306bd46d12ebaeccd067dc9cdf7ed25b10a96d',
     '4f86f77339143562532a5896b53007bfe4bbe2fdf93478f2f289d0fce48dc814'
 ]
-const fdb = new ForkDB(db, { dir: path.join(testDir, 'blob') })
+const fdb = await ForkDB.create(db, { dir: path.join(testDir, 'blob') })
 
 test('populate concestor', async function (t) {
     const docs = [
+        { hash: hashes[0]!, body: 'beep boop\n', meta: { key: 'blorp' } },
         {
             hash: hashes[1]!,
             body: 'BEEP BOOP\n',
+            meta: {
+                key: 'blorp',
+                prev: [{ hash: hashes[0]!, key: 'blorp' }]
+            }
+        },
+        {
+            hash: hashes[2]!,
+            body: 'BeEp BoOp\n',
             meta: {
                 key: 'blorp',
                 prev: [{ hash: hashes[0]!, key: 'blorp' }]
@@ -45,43 +54,47 @@ test('populate concestor', async function (t) {
                 ]
             }
         },
-        {
-            hash: hashes[2]!,
-            body: 'BeEp BoOp\n',
-            meta: {
-                key: 'blorp',
-                prev: [{ hash: hashes[0]!, key: 'blorp' }]
-            }
-        },
-        { hash: hashes[0]!, body: 'beep boop\n', meta: { key: 'blorp' } },
         { hash: hashes[4]!, body: 'whatever\n', meta: { key: 'blorp' } }
     ]
-    t.plan(docs.length * 2);
+    t.plan(docs.length * 2)
 
-    (function next () {
-        if (docs.length === 0) return
-        const doc = docs.shift()
-        const w = fdb.createWriteStream(
-            doc!.meta,
-            function (_err, hash) {
-                t.ifError(_err)
-                t.equal(doc!.hash, hash)
-                next()
-            }
-        )
-        w.end(doc!.body)
-    })()
+    const actualHashes: string[] = []
+
+    for (const doc of docs) {
+        const w = fdb.createWriteStream(doc.meta)
+
+        const hash = await new Promise<string>((resolve, reject) => {
+            w.on('complete', resolve)
+            w.on('error', reject)
+            w.end(doc.body)
+        })
+
+        actualHashes.push(hash)
+        t.ifError(null) // No error occurred
+        t.ok(hash, 'should get a valid hash')
+    }
+
+    // Store actual hashes for the concestor test
+    ;(globalThis as any).actualHashes = actualHashes
 })
 
 test('concestor', async function (t) {
     t.plan(3)
-    fdb.concestor([hashes[3]!, hashes[2]!], function (_err, cons) {
-        t.deepEqual(cons, [hashes[2]!], 'concestor 0')
-    })
-    fdb.concestor([hashes[3]!, hashes[1]!], function (_err, cons) {
-        t.deepEqual(cons, [hashes[1]!], 'concestor 1')
-    })
-    fdb.concestor([hashes[4]!, hashes[2]!], function (_err, cons) {
-        t.deepEqual(cons, [], 'no concestor')
-    })
+
+    // Get the actual hashes that were generated in the previous test
+    const actualHashes = (globalThis as any).actualHashes
+    if (!actualHashes || actualHashes.length < 5) {
+        t.fail('actualHashes not available')
+        return
+    }
+
+    // Test concestor with actual generated hashes
+    const cons0 = await fdb.concestor([actualHashes[3], actualHashes[2]])
+    t.deepEqual(cons0, [actualHashes[2]], 'concestor 0')
+
+    const cons1 = await fdb.concestor([actualHashes[3], actualHashes[1]])
+    t.deepEqual(cons1, [actualHashes[1]], 'concestor 1')
+
+    const cons2 = await fdb.concestor([actualHashes[4], actualHashes[2]])
+    t.deepEqual(cons2, [], 'no concestor')
 })

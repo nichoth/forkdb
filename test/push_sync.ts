@@ -3,7 +3,7 @@ import path from 'node:path'
 import level from './lib/level.js'
 import { mkdirSync } from 'node:fs'
 
-import ForkDB from '../src/index.js'
+import ForkDB from '../src/index.ts'
 import { tmpdir } from 'node:os'
 
 // interface ExpectedData {
@@ -21,8 +21,8 @@ mkdirSync(testDir, { recursive: true })
 
 const db1 = level(path.join(testDir, 'db1'))
 const db2 = level(path.join(testDir, 'db2'))
-const forkdb1 = new ForkDB(db1, { dir: path.join(testDir, 'blob1') })
-const forkdb2 = new ForkDB(db2, { dir: path.join(testDir, 'blob2') })
+const forkdb1 = await ForkDB.create(db1, { dir: path.join(testDir, 'blob1') })
+const forkdb2 = await ForkDB.create(db2, { dir: path.join(testDir, 'blob2') })
 
 const hashes = [
     '9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0',
