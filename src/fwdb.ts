@@ -60,49 +60,30 @@ export default class FWDB extends EventEmitter {
         if (!this.db.batchAsync) this.db.batchAsync = this.db.batch
     }
 
-    create (opts: FWDBOptions | FWDBOptions[], cb?: (err: any, rows?: DBRow[]) => void): void {
-        if (!cb) cb = noop
-
-        let i = 0
-        const rows: DBRow[] = []
-
-        const done = (_err: any, rows: DBRow[]) => {
-            this.emit('batch', rows)
-            this.db.batchAsync(rows).then(() => cb!(null)).catch(cb!)
-        }
-
-        const loop = (err?: any, rows_?: DBRow[]) => {
-            if (err) return cb!(err)
-            if (rows_) rows.push(...rows_)
-            if (i === (opts as FWDBOptions[]).length) done(null, rows)
-            else this._create((opts as FWDBOptions[])[i++]!, loop)
-        }
-
+    async create (opts: FWDBOptions | FWDBOptions[]): Promise<DBRow[]> {
         if (!Array.isArray(opts)) {
-            this._create(opts as FWDBOptions, done)
+            const rows = await this._create(opts as FWDBOptions)
+            this.emit('batch', rows)
+            await this.db.batchAsync(rows)
+            return rows
         } else {
-            loop()
+            const allRows: DBRow[] = []
+            for (const opt of opts) {
+                const rows = await this._create(opt)
+                allRows.push(...rows)
+            }
+            this.emit('batch', allRows)
+            await this.db.batchAsync(allRows)
+            return allRows
         }
     }
 
-    async _create (opts: FWDBOptions, cb?: (err: any, rows: DBRow[]) => void): Promise<DBRow[]> {
-        if (typeof opts === 'function') {
-            cb = opts as any
-            opts = {}
-        }
+    async _create (opts: FWDBOptions): Promise<DBRow[]> {
         if (!opts) opts = {}
 
         const hash = opts.hash
         let prev = defined(opts.prev, [])
         if (!Array.isArray(prev)) prev = [prev]
-
-        let cbCalled = false
-        const cb_ = (err: any, rows?: DBRow[]) => {
-            if (!cbCalled) {
-                if (cb) cb(err, rows || [])
-                cbCalled = true
-            }
-        }
 
         const key = opts.key
         const prebatch = defined(
@@ -116,17 +97,19 @@ export default class FWDB extends EventEmitter {
 
         let pending = 1 + prev.length
 
-        const commit = () => {
-            prebatch(rows, done)
+        const commit = (): Promise<DBRow[]> => {
+            return new Promise((resolve, reject) => {
+                prebatch(rows, (err: any, finalRows: DBRow[]) => {
+                    if (err) {
+                        reject(err)
+                        return
+                    }
+                    resolve(finalRows || rows)
+                })
+            })
         }
 
-        const done = (err: any, rows_?: DBRow[]) => {
-            if (err) return cb_(err)
-            if (!Array.isArray(rows_)) return cb_(new Error('prebatch result not an array'))
-            cb_(null, rows_)
-        }
-
-        const ondangling = (dangling: DanglingEntry[], ex: boolean) => {
+        const ondangling = (dangling: DanglingEntry[], ex: boolean): Promise<DBRow[]> => {
             if (dangling.length === 0 && !ex) {
                 rows.push({
                     type: 'put',
@@ -144,7 +127,10 @@ export default class FWDB extends EventEmitter {
                 })
             })
             pending--
-            if (pending === 0) commit()
+            if (pending === 0) {
+                return commit()
+            }
+            return Promise.resolve(rows)
         }
 
         for (const phash of prev) {
@@ -169,39 +155,24 @@ export default class FWDB extends EventEmitter {
                     })
                 }
                 pending--
-                if (pending === 0) commit()
+                if (pending === 0) {
+                    return commit()
+                }
             } catch (err) {
-                cb_(err)
-                return []
+                throw err
             }
         }
 
         try {
             const ex = await exists(this.db, ['hash', hash])
             const dangling = await getDangling(this.db, key!, hash!)
-            ondangling(dangling, ex)
+            return ondangling(dangling, ex)
         } catch (err) {
-            cb_(err)
-            return []
+            throw err
         }
-
-        return new Promise((resolve, reject) => {
-            const originalCb = cb
-            cb = (err: any, rows?: DBRow[]) => {
-                if (originalCb) originalCb(err, rows || [])
-                if (err) reject(err)
-                else resolve(rows || [])
-            }
-        })
     }
 
-    async heads (key: string, opts: any = {}, cb?: (err: any, result?: HeadsEntry[]) => void): Promise<HeadsEntry[]> {
-        if (typeof opts === 'function') {
-            cb = opts
-            opts = {}
-        }
-        if (!opts) opts = {}
-
+    async heads (key: string, opts: any = {}): Promise<HeadsEntry[]> {
         try {
             const results: HeadsEntry[] = []
             const iterator = this.db.iterator(wrap(opts, {
@@ -213,21 +184,13 @@ export default class FWDB extends EventEmitter {
                 results.push({ hash: key[2] })
             }
 
-            if (cb) cb(null, results)
             return results
         } catch (err) {
-            if (cb) cb(err, [])
             throw err
         }
     }
 
-    async links (hash: string, opts: any = {}, cb?: (err: any, result?: LinksEntry[]) => void): Promise<LinksEntry[]> {
-        if (typeof opts === 'function') {
-            cb = opts
-            opts = {}
-        }
-        if (!opts) opts = {}
-
+    async links (hash: string, opts: any = {}): Promise<LinksEntry[]> {
         try {
             const results: LinksEntry[] = []
             const iterator = this.db.iterator(wrap(opts, {
@@ -239,21 +202,13 @@ export default class FWDB extends EventEmitter {
                 results.push({ key: value, hash: key[2] })
             }
 
-            if (cb) cb(null, results)
             return results
         } catch (err) {
-            if (cb) cb(err, [])
             throw err
         }
     }
 
-    async keys (opts: any = {}, cb?: (err: any, result?: KeysEntry[]) => void): Promise<KeysEntry[]> {
-        if (typeof opts === 'function') {
-            cb = opts
-            opts = {}
-        }
-        if (!opts) opts = {}
-
+    async keys (opts: any = {}): Promise<KeysEntry[]> {
         try {
             const results: KeysEntry[] = []
             const iterator = this.db.iterator(wrap(opts, {
@@ -265,10 +220,8 @@ export default class FWDB extends EventEmitter {
                 results.push({ key: key[1] })
             }
 
-            if (cb) cb(null, results)
             return results
         } catch (err) {
-            if (cb) cb(err, [])
             throw err
         }
     }
@@ -316,5 +269,3 @@ async function getDangling (db: any, key: string, hash: string): Promise<Danglin
     
     return results
 }
-
-function noop (): void {}
