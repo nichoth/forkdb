@@ -15,7 +15,6 @@ mkdirSync(testDir, { recursive: true })
 
 const db = level(path.join(testDir, 'db'))
 
-
 const fdb = await ForkDB.create(db, { dir: path.join(testDir, 'blob') })
 
 test('populate concestor', async function (t) {

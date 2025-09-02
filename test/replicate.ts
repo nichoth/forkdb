@@ -6,6 +6,7 @@ import { mkdirSync } from 'node:fs'
 import ForkDB from '../src/index.ts'
 import concat from './lib/concat-stream.js'
 import through from '../src/through.ts'
+import { tmpdir } from 'node:os'
 
 interface ExpectedData {
     heads: Array<{ hash: string }>
@@ -13,9 +14,6 @@ interface ExpectedData {
     list: Array<{ hash: string; meta: any }>
     links: Record<string, Array<{ key: string; hash: string }>>
 }
-import { tmpdir } from 'node:os'
-
-
 
 const testDir = path.join(
     tmpdir(),
@@ -232,6 +230,6 @@ function sort (xs: any) {
     function cmp (a: any, b: any) {
         if (a.hash !== undefined && a.hash < b.hash) return -1
         if (a.hash !== undefined && a.hash > b.hash) return 1
-            return 0
+        return 0
     }
 }

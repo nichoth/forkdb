@@ -52,7 +52,7 @@ export default class FWDB extends EventEmitter {
         super()
         // Modern level modules handle encoding options directly
         this.db = db
-        
+
         // Ensure the database has the required methods
         if (!this.db.getAsync) this.db.getAsync = this.db.get
         if (!this.db.putAsync) this.db.putAsync = this.db.put
@@ -258,7 +258,7 @@ async function getDangling (db: any, key: string, hash: string): Promise<Danglin
         gt: ['dangle', key, hash, null],
         lt: ['dangle', key, hash, undefined]
     })
-    
+
     try {
         for await (const [key, value] of iterator) {
             results.push({ key })
@@ -266,6 +266,6 @@ async function getDangling (db: any, key: string, hash: string): Promise<Danglin
     } finally {
         await iterator.close()
     }
-    
+
     return results
 }

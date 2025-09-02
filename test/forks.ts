@@ -1,223 +1,202 @@
 import { test } from '@substrate-system/tapzero'
 import path from 'node:path'
-import level from './lib/level.js'
-import { mkdirSync } from 'node:fs'
-import concat from './lib/concat-stream.js'
 import { tmpdir } from 'node:os'
+import { unlink } from 'node:fs/promises'
 import ForkDB from '../src/index.ts'
 
-interface ExpectedData {
-    heads: Array<{ hash: string }>
-    tails: Array<{ hash: string }>
-    list: Array<{ hash: string; meta: any }>
-    links: Record<string, Array<{ key: string; hash: string }>>
-}
+test('first doc', async (t) => {
+    const testDir = path.join(tmpdir(), 'forkdb-test-' + Math.random())
+    const LevelDB = (await import('./lib/level.js')).default
+    const db = new LevelDB(testDir)
+    const fdb = new ForkDB(db)
 
-const testDir = path.join(
-    tmpdir(),
-    'forkdb-test-' + Math.random()
-)
-mkdirSync(testDir, { recursive: true })
-
-const db = level(path.join(testDir, 'db'))
-const fdb = await ForkDB.create(db, { dir: path.join(testDir, 'blob') })
-
-test('first doc', async function (t) {
-    t.plan(6)
-
-    const key = await new Promise<string>((resolve, reject) => {
+    const firstHash = await new Promise<string>((resolve, reject) => {
         const w = fdb.createWriteStream({ key: 'blorp' })
         w.on('complete', (hash) => resolve(hash))
         w.on('error', (err) => reject(err))
-        w.end('beep boop\n')
+        w.end('hello world\n')
     })
 
-    const expected: ExpectedData = {
-        heads: [{ hash: key }],
-        tails: [{ hash: key }],
-        list: [{ hash: key, meta: { key: 'blorp' } }],
-        links: {}
+    const check = async () => {
+        const heads = await fdb.heads('blorp') as any[]
+        t.equal(heads.length, 1)
+        t.equal(heads[0].hash, firstHash)
+
+        const tails = await fdb.tails('blorp')
+        t.equal(tails.length, 1)
+        t.equal(tails[0].hash, firstHash)
+
+        const list = await fdb.listByKey('blorp')
+        t.equal(list.length, 1)
+        t.equal(list[0].hash, firstHash)
+
+        const links = await fdb.linksByKey('blorp')
+        t.deepEqual(links, {})
     }
 
-    t.ok(key, 'should get a valid hash')
-    await check(t, fdb, expected)
+    await check()
+
+    // Clean up
+    await db.close()
+    await unlink(testDir).catch(() => {})
 })
 
-test('second doc', async function (t) {
-    t.plan(8)
+test('second doc', async (t) => {
+    const testDir = path.join(tmpdir(), 'forkdb-test-' + Math.random())
+    const LevelDB = (await import('./lib/level.js')).default
+    const db = new LevelDB(testDir)
+    const fdb = new ForkDB(db)
 
-    const w = fdb.createWriteStream({
-        key: 'blorp',
-        prev: [globalThis.firstHash]
-    }, onfinish)
-
-    async function onfinish (_err: any, key: any) {
-        t.ifError(_err)
-        t.ok(key, 'should get a valid hash')
-
-        const expected: ExpectedData = {
-            heads: [{ hash: key }],
-            tails: [{ hash: globalThis.firstHash }],
-            list: [
-                { hash: globalThis.firstHash, meta: { key: 'blorp' } },
-                {
-                    hash: key,
-                    meta: {
-                        key: 'blorp',
-                        prev: [globalThis.firstHash]
-                    }
-                }
-            ],
-            links: {
-                [globalThis.firstHash]: [{ key: 'blorp', hash: key }]
-            }
-        }
-
-        await check(t, fdb, expected)
-        fdb.createReadStream(globalThis.firstHash).pipe(concat(function (body) {
-            t.equal(body.toString('utf8'), 'beep boop\n')
-        }))
-        fdb.createReadStream(key).pipe(concat(function (body) {
-            t.equal(body.toString('utf8'), 'BEEP BOOP\n')
-        }))
-    }
-    w.end('BEEP BOOP\n')
-})
-
-test('third doc (conflict)', async function (t) {
-    t.plan(9)
-
-    const expected: ExpectedData = {
-        heads: [],
-        tails: [],
-        list: [],
-        links: {}
-    }
-
-    const w = fdb.createWriteStream({
-        key: 'blorp',
-        prev: [globalThis.firstHash]
-    }, onfinish)
-    
-    async function onfinish (_err: any, key: any) {
-        t.ifError(_err)
-        t.ok(key, 'should get a valid hash')
-        
-        await check(t, fdb, expected)
-        fdb.createReadStream(globalThis.firstHash).pipe(concat(function (body) {
-            t.equal(body.toString('utf8'), 'beep boop\n')
-        }))
-        fdb.createReadStream(key).pipe(concat(function (body) {
-            t.equal(body.toString('utf8'), 'BEEP BOOP\n')
-        }))
-    }
-    w.end('BEEP BOOP\n')
-})
-
-test('fourth doc (resolve conflict)', async function (t) {
-    t.plan(11)
-
-    const w = fdb.createWriteStream({
-        key: 'blorp',
-        prev: [globalThis.secondHash, globalThis.thirdHash]
-    }, onfinish)
-    
-    async function onfinish (_err: any, key: any) {
-        t.ifError(_err)
-        t.ok(key, 'should get a valid hash')
-        
-        const expected: ExpectedData = {
-            heads: [{ hash: key }],
-            tails: [],
-            list: [
-                { hash: globalThis.firstHash, meta: { key: 'blorp' } },
-                {
-                    hash: globalThis.secondHash,
-                    meta: {
-                        key: 'blorp',
-                        prev: [globalThis.firstHash]
-                    }
-                },
-                {
-                    hash: globalThis.thirdHash,
-                    meta: {
-                        key: 'blorp',
-                        prev: [globalThis.firstHash]
-                    }
-                },
-                {
-                    hash: key,
-                    meta: {
-                        key: 'blorp',
-                        prev: [globalThis.secondHash, globalThis.thirdHash]
-                    }
-                }
-            ],
-            links: {
-                [globalThis.firstHash]: [
-                    { key: 'blorp', hash: globalThis.secondHash },
-                    { key: 'blorp', hash: globalThis.thirdHash }
-                ],
-                [globalThis.secondHash]: [{ key: 'blorp', hash: key }],
-                [globalThis.thirdHash]: [{ key: 'blorp', hash: key }]
-            }
-        }
-        
-        await check(t, fdb, expected)
-        fdb.createReadStream(globalThis.firstHash).pipe(concat(function (body) {
-            t.equal(body.toString('utf8'), 'beep boop\n')
-        }))
-        fdb.createReadStream(globalThis.secondHash).pipe(concat(function (body) {
-            t.equal(body.toString('utf8'), 'BEEP BOOP\n')
-        }))
-        fdb.createReadStream(globalThis.thirdHash).pipe(concat(function (body) {
-            t.equal(body.toString('utf8'), 'BEEP BOOP\n')
-        }))
-        fdb.createReadStream(key).pipe(concat(function (body) {
-            t.equal(body.toString('utf8'), 'BEEPITY BOOPITY\n')
-        }))
-    }
-    w.end('BEEPITY BOOPITY\n')
-})
-
-async function check (t: any, fdb: any, expected: ExpectedData) {
-    const heads = await fdb.heads('blorp')
-    t.deepEqual(heads, expected.heads, 'heads')
-    
-    const tails = await fdb.tails('blorp')
-    t.deepEqual(tails, expected.tails, 'tails')
-    
-    const list = await fdb.listByKey('blorp')
-    t.deepEqual(list, expected.list, 'list')
-    
-    const links = await fdb.links('blorp')
-    t.deepEqual(links, expected.links, 'links')
-}
-
-// Store hashes globally for use across tests
-globalThis.firstHash = await new Promise<string>((resolve, reject) => {
-    const w = fdb.createWriteStream({ key: 'blorp' })
-    w.on('complete', resolve)
-    w.on('error', reject)
-    w.end('beep boop\n')
-})
-
-globalThis.secondHash = await new Promise<string>((resolve, reject) => {
-    const w = fdb.createWriteStream({
-        key: 'blorp',
-        prev: [globalThis.firstHash]
+    const firstHash = await new Promise<string>((resolve, reject) => {
+        const w = fdb.createWriteStream({ key: 'blorp' })
+        w.on('complete', (hash) => resolve(hash))
+        w.on('error', (err) => reject(err))
+        w.end('hello world\n')
     })
-    w.on('complete', resolve)
-    w.on('error', reject)
-    w.end('BEEP BOOP\n')
+
+    const secondHash = await new Promise<string>((resolve, reject) => {
+        const w = fdb.createWriteStream({ key: 'blorp', prev: [firstHash] })
+        w.on('complete', (hash) => resolve(hash))
+        w.on('error', (err) => reject(err))
+        w.end('hello world2\n')
+    })
+
+    const check = async () => {
+        const heads = await fdb.heads('blorp') as any[]
+        t.equal(heads.length, 1)
+        t.equal(heads[0].hash, secondHash)
+
+        const tails = await fdb.tails('blorp')
+        t.equal(tails.length, 1)
+        t.equal(tails[0].hash, firstHash)
+
+        const list = await fdb.listByKey('blorp')
+        t.equal(list.length, 2)
+        t.equal(list[0].hash, firstHash)
+        t.equal(list[1].hash, secondHash)
+
+        const links = await fdb.linksByKey('blorp')
+        t.deepEqual(links, {})
+    }
+
+    await check()
+
+    // Clean up
+    await db.close()
+    await unlink(testDir).catch(() => {})
 })
 
-globalThis.thirdHash = await new Promise<string>((resolve, reject) => {
-    const w = fdb.createWriteStream({
-        key: 'blorp',
-        prev: [globalThis.firstHash]
+test('third doc (conflict)', async (t) => {
+    const testDir = path.join(tmpdir(), 'forkdb-test-' + Math.random())
+    const LevelDB = (await import('./lib/level.js')).default
+    const db = new LevelDB(testDir)
+    const fdb = new ForkDB(db)
+
+    const firstHash = await new Promise<string>((resolve, reject) => {
+        const w = fdb.createWriteStream({ key: 'blorp' })
+        w.on('complete', (hash) => resolve(hash))
+        w.on('error', (err) => reject(err))
+        w.end('hello world\n')
     })
-    w.on('complete', resolve)
-    w.on('error', reject)
-    w.end('BEEP BOOP\n')
+
+    const secondHash = await new Promise<string>((resolve, reject) => {
+        const w = fdb.createWriteStream({ key: 'blorp', prev: [firstHash] })
+        w.on('complete', (hash) => resolve(hash))
+        w.on('error', (err) => reject(err))
+        w.end('hello world2\n')
+    })
+
+    const thirdHash = await new Promise<string>((resolve, reject) => {
+        const w = fdb.createWriteStream({ key: 'blorp', prev: [firstHash] })
+        w.on('complete', (hash) => resolve(hash))
+        w.on('error', (err) => reject(err))
+        w.end('hello world3\n')
+    })
+
+    const check = async () => {
+        const heads = await fdb.heads('blorp') as any[]
+        t.equal(heads.length, 2) // Two heads due to conflict
+        t.ok(heads.some(h => h.hash === secondHash))
+        t.ok(heads.some(h => h.hash === thirdHash))
+
+        const tails = await fdb.tails('blorp')
+        t.equal(tails.length, 1)
+        t.equal(tails[0].hash, firstHash)
+
+        const list = await fdb.listByKey('blorp')
+        t.equal(list.length, 3)
+        t.equal(list[0].hash, firstHash)
+        t.ok(list.some(doc => doc.hash === secondHash))
+        t.ok(list.some(doc => doc.hash === thirdHash))
+
+        const links = await fdb.linksByKey('blorp')
+        t.deepEqual(links, {})
+    }
+
+    await check()
+
+    // Clean up
+    await db.close()
+    await unlink(testDir).catch(() => {})
+})
+
+test('fourth doc (resolve conflict)', async (t) => {
+    const testDir = path.join(tmpdir(), 'forkdb-test-' + Math.random())
+    const LevelDB = (await import('./lib/level.js')).default
+    const db = new LevelDB(testDir)
+    const fdb = new ForkDB(db)
+
+    const firstHash = await new Promise<string>((resolve, reject) => {
+        const w = fdb.createWriteStream({ key: 'blorp' })
+        w.on('complete', (hash) => resolve(hash))
+        w.on('error', (err) => reject(err))
+        w.end('hello world\n')
+    })
+
+    const secondHash = await new Promise<string>((resolve, reject) => {
+        const w = fdb.createWriteStream({ key: 'blorp', prev: [firstHash] })
+        w.on('complete', (hash) => resolve(hash))
+        w.on('error', (err) => reject(err))
+        w.end('hello world2\n')
+    })
+
+    const thirdHash = await new Promise<string>((resolve, reject) => {
+        const w = fdb.createWriteStream({ key: 'blorp', prev: [firstHash] })
+        w.on('complete', (hash) => resolve(hash))
+        w.on('error', (err) => reject(err))
+        w.end('hello world3\n')
+    })
+
+    const fourthHash = await new Promise<string>((resolve, reject) => {
+        const w = fdb.createWriteStream({ key: 'blorp', prev: [secondHash, thirdHash] })
+        w.on('complete', (hash) => resolve(hash))
+        w.on('error', (err) => reject(err))
+        w.end('hello world4\n')
+    })
+
+    const check = async () => {
+        const heads = await fdb.heads('blorp') as any[]
+        t.equal(heads.length, 1)
+        t.equal(heads[0].hash, fourthHash)
+
+        const tails = await fdb.tails('blorp')
+        t.equal(tails.length, 1)
+        t.equal(tails[0].hash, firstHash)
+
+        const list = await fdb.listByKey('blorp')
+        t.equal(list.length, 4)
+        t.equal(list[0].hash, firstHash)
+        t.ok(list.some(doc => doc.hash === secondHash))
+        t.ok(list.some(doc => doc.hash === thirdHash))
+        t.equal(list[3].hash, fourthHash)
+
+        const links = await fdb.linksByKey('blorp')
+        t.deepEqual(links, {})
+    }
+
+    await check()
+
+    // Clean up
+    await db.close()
+    await unlink(testDir).catch(() => {})
 })

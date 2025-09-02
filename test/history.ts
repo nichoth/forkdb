@@ -7,8 +7,6 @@ import { tmpdir } from 'node:os'
 import ForkDB from '../src/index.ts'
 import through from '../src/through.ts'
 
-
-
 const testDir = path.join(
     tmpdir(),
     'forkdb-test-' + Math.random()

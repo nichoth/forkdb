@@ -6,8 +6,6 @@ import { mkdirSync } from 'node:fs'
 import ForkDB from '../src/index.ts'
 import { tmpdir } from 'node:os'
 
-
-
 const testDir = path.join(
     tmpdir(),
     'forkdb-test-' + Math.random()

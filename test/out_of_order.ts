@@ -15,8 +15,6 @@ interface ExpectedData {
     links: Record<string, Array<{ key: string; hash: string }>>
 }
 
-
-
 const testDir = path.join(
     tmpdir(),
     'forkdb-test-' + Math.random()
@@ -167,6 +165,6 @@ function sort (xs: any) {
     function cmp (a: any, b: any) {
         if (a.hash !== undefined && a.hash < b.hash) return -1
         if (a.hash !== undefined && a.hash > b.hash) return 1
-            return 0
+        return 0
     }
 }
