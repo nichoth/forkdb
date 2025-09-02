@@ -712,6 +712,28 @@ export default class ForkDB extends EventEmitter {
         return rows.map((row) => ({ meta: row.value, hash: row.key[1] }))
     }
 
+    async listByKey (key: string, opts: any = {}): Promise<any[]> {
+        const rows: any[] = []
+        
+        // Use the iterator API to filter by key
+        const iterator = this._fwdb.db.iterator(wrap(opts, {
+            gt: (x: any) => ['meta', defined(x, null)],
+            lt: (x: any) => ['meta', defined(x, undefined)]
+        }))
+        
+        try {
+            for await (const [dbKey, value] of iterator) {
+                if (value && value.key === key) {
+                    rows.push({ key: dbKey, value })
+                }
+            }
+        } finally {
+            await iterator.close()
+        }
+        
+        return rows.map((row) => ({ meta: row.value, hash: row.key[1] }))
+    }
+
     listStream (opts: any = {}): Readable {
         const stream = new Readable({ objectMode: true })
         

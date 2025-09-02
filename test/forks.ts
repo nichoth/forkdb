@@ -187,7 +187,7 @@ async function check (t: any, fdb: any, expected: ExpectedData) {
     const tails = await fdb.tails('blorp')
     t.deepEqual(tails, expected.tails, 'tails')
     
-    const list = await fdb.list('blorp')
+    const list = await fdb.listByKey('blorp')
     t.deepEqual(list, expected.list, 'list')
     
     const links = await fdb.links('blorp')
