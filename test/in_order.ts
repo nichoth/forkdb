@@ -6,7 +6,6 @@ import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import ForkDB from '../src/index.ts'
 import concat from './lib/concat-stream.js'
-import through from '../src/through.ts'
 
 interface ExpectedData {
     heads: Array<{ hash: string }>
@@ -141,35 +140,3 @@ test('in order', async function (t) {
         t.equal(body.toString('utf8'), 'BEEPITY BOOPITY\n')
     }))
 })
-
-function collect (cb) {
-    const rows: any[] = []
-    return through.obj(write, end)
-    function write (row, _enc, next) { rows.push(row); next() }
-    function end () { cb(rows) }
-}
-
-async function check (t: any, fdb: any, expected: any) {
-    const heads = await fdb.heads('blorp')
-    t.deepEqual(sort(heads), sort(expected.heads), 'heads')
-
-    const tails = await fdb.tails('blorp')
-    t.deepEqual(sort(tails), sort(expected.tails), 'tails')
-
-    for (const hash of Object.keys(expected.links)) {
-        const links = await fdb.links(hash)
-        t.deepEqual(sort(links), sort(expected.links[hash]), 'links')
-    }
-
-    const list = await fdb.list()
-    t.deepEqual(sort(list), sort(expected.list), 'list')
-}
-
-function sort (xs: any) {
-    return xs.sort(cmp)
-    function cmp (a: any, b: any) {
-        if (a.hash !== undefined && a.hash < b.hash) return -1
-        if (a.hash !== undefined && a.hash > b.hash) return 1
-        return 0
-    }
-}

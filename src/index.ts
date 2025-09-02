@@ -175,19 +175,32 @@ export default class ForkDB extends EventEmitter {
             this._blobDir = opts.dir
             this.store = null as any
         } else {
-            // Use mock blob store for testing
-            let mockHashCounter = 0
+            // Use mock blob store for testing that generates real content-based hashes
             this.store = {
                 createWriteStream () {
-                    const writable = new EventEmitter()
-                    ;(writable as any).key = 'mock-hash-' + (++mockHashCounter).toString(36).padStart(9, '0')
+                    const writable = new EventEmitter() as any
+                    const chunks: Buffer[] = []
 
-                    ;(writable as any).write = (chunk: Buffer, encoding: string, callback: () => void) => {
+                    writable.write = (chunk: Buffer | string, encoding: string, callback: () => void) => {
+                        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
                         if (typeof callback === 'function') callback()
                     }
 
-                    ;(writable as any).end = (callback?: () => void) => {
+                    writable.end = (chunk?: Buffer | string, callback?: () => void) => {
+                        if (chunk) {
+                            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+                        }
                         if (typeof callback === 'function') callback()
+
+                        // Generate simple hash for testing (not cryptographically secure)
+                        const content = Buffer.concat(chunks)
+                        let hash = 0
+                        for (let i = 0; i < content.length; i++) {
+                            hash = ((hash << 5) - hash + content[i]) & 0xffffffff
+                        }
+                        // Convert to positive hex string
+                        writable.key = (hash >>> 0).toString(16).padStart(8, '0')
+
                         // Emit finish event immediately
                         writable.emit('finish')
                     }
@@ -195,13 +208,21 @@ export default class ForkDB extends EventEmitter {
                     return writable
                 },
                 createReadStream (_options: { key: string }) {
-                    const { Readable } = require('readable-stream')
-                    const readable = new Readable()
+                    const readable = new EventEmitter() as any
                     readable._read = () => {
                         // Return the content that was written
                         readable.push('test content\n')
                         readable.push(null)
                     }
+                    readable.push = (chunk: any) => {
+                        readable.emit('data', chunk)
+                    }
+                    readable.pipe = (dest: any) => {
+                        readable.on('data', (chunk) => dest.write(chunk))
+                        readable.on('end', () => dest.end())
+                        return dest
+                    }
+                    readable.push(null)
                     return readable
                 }
             }
