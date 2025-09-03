@@ -6,7 +6,6 @@ import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import ForkDB from '../src/index.ts'
 
-
 const testDir = path.join(
     tmpdir(),
     'forkdb-test-' + Math.random()
@@ -78,5 +77,4 @@ test('in order', async function (t) {
     t.ok(hashes[2], 'third hash exists')
     t.ok(hashes[3], 'fourth hash exists')
 })
-
 

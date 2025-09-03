@@ -895,7 +895,7 @@ export default class ForkDB extends EventEmitter {
         // For each document, find documents that point TO it (forward links)
         for (const doc of docs) {
             const forwardLinks: LinksEntry[] = []
-            
+
             // Look for documents that have this document in their prev array
             for (const otherDoc of docs) {
                 if (otherDoc.hash !== doc.hash && otherDoc.prev && otherDoc.prev.includes(doc.hash)) {
@@ -905,7 +905,7 @@ export default class ForkDB extends EventEmitter {
                     })
                 }
             }
-            
+
             if (forwardLinks.length > 0) {
                 links[doc.hash] = forwardLinks
             }

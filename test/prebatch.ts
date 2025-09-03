@@ -6,7 +6,6 @@ import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import ForkDB from '../src/index.ts'
 
-
 const testDir = path.join(
     tmpdir(),
     'forkdb-test-' + Math.random()
@@ -17,9 +16,9 @@ const db = level(path.join(testDir, 'db'))
 const forkdb = new ForkDB(db, {})
 
 const hashes = [
-    'a3533048', // beep boop\n
-    '352e45fc', // BEEP BOOP\n
-    '5a921dfc', // BeEp BoOp\n
+    'a3533048',  // beep boop\n
+    '352e45fc',  // BEEP BOOP\n
+    '5a921dfc',  // BeEp BoOp\n
     'c5d41a61'  // BEEPITY BOOPITY\n
 ]
 
@@ -88,5 +87,4 @@ test('prebatch', async function (t) {
     t.ok(hashes[2], 'third hash exists')
     t.ok(hashes[3], 'fourth hash exists')
 })
-
 

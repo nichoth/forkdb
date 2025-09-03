@@ -1,12 +1,6 @@
-import bytewise from 'bytewise'
-import through from './through.ts'
-import readonly from 'read-only-stream'
 import wrap from 'level-option-wrap'
 import { EventEmitter } from 'events'
-import type { Readable } from 'stream'
 import { defined } from './index.ts'
-
-const { encode } = bytewise
 
 // Type definitions
 export interface FWDBOptions {
@@ -134,60 +128,48 @@ export default class FWDB extends EventEmitter {
         }
 
         for (const phash of prev) {
-            try {
-                const ex = await exists(this.db, ['hash', phash])
-                if (ex) {
-                    rows.push({
-                        type: 'del',
-                        key: ['head', key, phash],
-                        value: 0
-                    })
-                    rows.push({
-                        type: 'put',
-                        key: ['link', phash, hash],
-                        value: key
-                    })
-                } else {
-                    rows.push({
-                        type: 'put',
-                        key: ['dangle', key, phash, hash],
-                        value: 0
-                    })
-                }
-                pending--
-                if (pending === 0) {
-                    return commit()
-                }
-            } catch (err) {
-                throw err
+            const ex = await exists(this.db, ['hash', phash])
+            if (ex) {
+                rows.push({
+                    type: 'del',
+                    key: ['head', key, phash],
+                    value: 0
+                })
+                rows.push({
+                    type: 'put',
+                    key: ['link', phash, hash],
+                    value: key
+                })
+            } else {
+                rows.push({
+                    type: 'put',
+                    key: ['dangle', key, phash, hash],
+                    value: 0
+                })
+            }
+            pending--
+            if (pending === 0) {
+                return commit()
             }
         }
 
-        try {
-            const ex = await exists(this.db, ['hash', hash])
-            const dangling = await getDangling(this.db, key!, hash!)
-            return ondangling(dangling, ex)
-        } catch (err) {
-            throw err
-        }
+        const ex = await exists(this.db, ['hash', hash])
+        const dangling = await getDangling(this.db, key!, hash!)
+        return ondangling(dangling, ex)
     }
 
     async _headsAsync (key: string, opts: any = {}): Promise<HeadsEntry[]> {
-        try {
-            const results: HeadsEntry[] = []
-            const iterator = this.db.iterator(wrap(opts, {
-                gt: (x: any) => ['head', key, defined(x, null)],
-                lt: (x: any) => ['head', key, defined(x, undefined)]
-            }))
+        const results: HeadsEntry[] = []
+        const iterator = this.db.iterator(wrap(opts, {
+            gt: (x: any) => ['head', key, defined(x, null)],
+            lt: (x: any) => ['head', key, defined(x, undefined)]
+        }))
 
-            for await (const [key, value] of iterator) {
-                results.push({ hash: key[2] })
-            }
-
-            return results
-        } catch (err) {
-            throw err
+        for await (const [key, _value] of iterator) {
+            results.push({ hash: key[2] })
         }
+
+        return results
     }
 
     // Callback-based version for backward compatibility
@@ -200,21 +182,17 @@ export default class FWDB extends EventEmitter {
     }
 
     async _linksAsync (hash: string, opts: any = {}): Promise<LinksEntry[]> {
-        try {
-            const results: LinksEntry[] = []
-            const iterator = this.db.iterator(wrap(opts, {
-                gt: (x: any) => ['link', hash, defined(x, null)],
-                lt: (x: any) => ['link', hash, defined(x, undefined)]
-            }))
+        const results: LinksEntry[] = []
+        const iterator = this.db.iterator(wrap(opts, {
+            gt: (x: any) => ['link', hash, defined(x, null)],
+            lt: (x: any) => ['link', hash, defined(x, undefined)]
+        }))
 
-            for await (const [key, value] of iterator) {
-                results.push({ key: value, hash: key[2] })
-            }
-
-            return results
-        } catch (err) {
-            throw err
+        for await (const [key, value] of iterator) {
+            results.push({ key: value, hash: key[2] })
         }
+
+        return results
     }
 
     // Callback-based version for backward compatibility
@@ -227,35 +205,18 @@ export default class FWDB extends EventEmitter {
     }
 
     async keys (opts: any = {}): Promise<KeysEntry[]> {
-        try {
-            const results: KeysEntry[] = []
-            const iterator = this.db.iterator(wrap(opts, {
-                gt: (x: any) => ['key', defined(x, null)],
-                lt: (x: any) => ['key', defined(x, undefined)]
-            }))
+        const results: KeysEntry[] = []
+        const iterator = this.db.iterator(wrap(opts, {
+            gt: (x: any) => ['key', defined(x, null)],
+            lt: (x: any) => ['key', defined(x, undefined)]
+        }))
 
-            for await (const [key, value] of iterator) {
-                results.push({ key: key[1] })
-            }
-
-            return results
-        } catch (err) {
-            throw err
+        for await (const [key, _value] of iterator) {
+            results.push({ key: key[1] })
         }
+
+        return results
     }
-}
-
-function collect<T> (cb: (err: any, rows: T[]) => void) {
-    const rows: T[] = []
-    return through.obj(
-        function write (row: T, _enc: BufferEncoding, next: () => void) {
-            rows.push(row)
-            next()
-        },
-        function end () {
-            cb(null, rows)
-        }
-    )
 }
 
 async function exists (db: any, key: any[]): Promise<boolean> {
@@ -278,7 +239,7 @@ async function getDangling (db: any, key: string, hash: string): Promise<Danglin
     })
 
     try {
-        for await (const [key, value] of iterator) {
+        for await (const [key, _value] of iterator) {
             results.push({ key })
         }
     } finally {
