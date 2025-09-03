@@ -109,8 +109,16 @@ test('populate push sync', async function (t) {
 })
 
 test('push sync', async function (t) {
-    t.plan(1)
-    t.ok(true, 'replication test simplified')
+    t.plan(2)
+    const ra = forkdb1.replicate({ mode: 'push' })
+    ra.on('available', (_hs: any) => {
+        t.ok(true, 'push mode completed')
+    })
+    const rb = forkdb2.replicate({ mode: 'sync' })
+    rb.on('available', (_hs: any) => {
+        t.ok(true, 'sync mode completed')
+    })
+    ra.pipe(rb).pipe(ra)
 })
 
 test('push sync verify', async function (t) {

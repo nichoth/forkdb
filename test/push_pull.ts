@@ -92,16 +92,56 @@ test('populate push pull', async function (t) {
 })
 
 test('push pull', async function (t) {
-    t.plan(1)
-    t.ok(true, 'replication test simplified')
+    t.plan(2)
+    const ra = forkdb1.replicate({ mode: 'push' })
+    ra.on('available', (_hs: any) => {
+        t.ok(true, 'push mode completed')
+    })
+    const rb = forkdb2.replicate({ mode: 'pull' })
+    rb.on('available', (_hs: any) => {
+        t.ok(true, 'pull mode completed')
+    })
+    ra.pipe(rb).pipe(ra)
 })
 
 test('push pull verify', async function (t) {
-    t.plan(4)
-    t.ok(true, 'verification test simplified')
-    t.ok(true, 'verification test simplified 2')
-    t.ok(true, 'verification test simplified 3')
-    t.ok(true, 'verification test simplified 4')
+    t.plan(8)
+
+    forkdb1.heads('blorp', (err: any, hs: any) => {
+        t.ifError(err)
+        t.deepEqual(hs, [{ hash: hashes[2]! }], 'heads a')
+    })
+
+    try {
+        const listA = await forkdb1.listByKey('blorp')
+        t.deepEqual(
+            mhashes(listA).sort(),
+            [hashes[0]!, hashes[2]!].sort(),
+            'list a'
+        )
+        t.ok(true, 'list a no error')
+    } catch (err) {
+        t.fail('list a error: ' + err)
+        t.fail('list a error stub')
+    }
+
+    forkdb2.heads('blorp', (err: any, hs: any) => {
+        t.ifError(err)
+        t.deepEqual(hs, [{ hash: hashes[3]! }], 'heads b')
+    })
+
+    try {
+        const listB = await forkdb2.listByKey('blorp')
+        t.deepEqual(
+            mhashes(listB).sort(),
+            [hashes[0]!, hashes[1]!, hashes[2]!, hashes[3]!].sort(),
+            'list b'
+        )
+        t.ok(true, 'list b no error')
+    } catch (err) {
+        t.fail('list b error: ' + err)
+        t.fail('list b error stub')
+    }
 })
 
 function mhashes (xs) { return xs.map(function (x) { return x.hash }) }

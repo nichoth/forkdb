@@ -93,14 +93,30 @@ test('populate push sync', async function (t) {
 })
 
 test('since', async function (t) {
-    t.plan(1)
-    t.ok(true, 'since test simplified')
+    t.plan(2)
+    const ra = forkdb1.replicate({ mode: 'sync' })
+    ra.on('available', (_hs: any) => {
+        t.ok(true, 'sync mode a completed')
+    })
+    const rb = forkdb2.replicate({ mode: 'sync' })
+    rb.on('available', (_hs: any) => {
+        t.ok(true, 'sync mode b completed')
+    })
+    ra.pipe(rb).pipe(ra)
 })
 
 test('since verify', async function (t) {
-    t.plan(2)
-    t.ok(true, 'verification test simplified')
-    t.ok(true, 'verification test simplified 2')
+    t.plan(4)
+
+    forkdb1.heads('blorp', (err: any, hs: any) => {
+        t.ifError(err)
+        t.deepEqual(hs, [{ hash: hashes[3]! }])
+    })
+
+    forkdb2.heads('blorp', (err: any, hs: any) => {
+        t.ifError(err)
+        t.deepEqual(hs, [{ hash: hashes[3]! }])
+    })
 })
 
 test('since add another', async function (t) {
@@ -116,14 +132,40 @@ test('since add another', async function (t) {
 })
 
 test('since replicate sequence', async function (t) {
-    t.plan(3)
-    t.ok(true, 'replication test simplified')
-    t.ok(true, 'replication test simplified 2')
-    t.ok(true, 'replication test simplified 3')
+    t.plan(7)
+    const ra = forkdb1.replicate({ mode: 'sync' })
+    ra.on('available', (hs: any) => {
+        t.deepEqual(hs, [hashes[0]!])
+        t.ok(true, 'available A event')
+    })
+    ra.on('since', (seq: any) => {
+        t.equal(seq, 3, 'since A')
+    })
+    ra.on('response', () => t.fail('should not get response A'))
+    const rb = forkdb2.replicate({ mode: 'sync' })
+    rb.on('available', (hs: any) => {
+        t.deepEqual(hs, [hashes[3]!, hashes[4]!], 'available B')
+        t.ok(true, 'available B event')
+    })
+    rb.on('since', (seq: any) => {
+        t.equal(seq, 3, 'since B')
+    })
+    rb.on('response', (hash: any) => {
+        t.deepEqual(hash, hashes[4]!)
+    })
+    ra.pipe(rb).pipe(ra)
 })
 
 test('since verify after', async function (t) {
-    t.plan(2)
-    t.ok(true, 'verification test simplified')
-    t.ok(true, 'verification test simplified 2')
+    t.plan(4)
+
+    forkdb1.heads('blorp', (err: any, hs: any) => {
+        t.ifError(err)
+        t.deepEqual(hs, [{ hash: hashes[4]! }])
+    })
+
+    forkdb2.heads('blorp', (err: any, hs: any) => {
+        t.ifError(err)
+        t.deepEqual(hs, [{ hash: hashes[4]! }])
+    })
 })
