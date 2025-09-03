@@ -426,37 +426,38 @@ export default class ForkDB extends EventEmitter {
             }
         })
 
-        ex.on('since', (seq: number) => {
-            provideSeq(seq)
+        ex.on('since', async (seq: number) => {
+            await provideSeq(seq)
         })
 
         ex.on('seen', async (seq: number) => {
             await this._addSeen(other.id, seq)
         })
 
-        const provideSeq = (seq: number) => {
+        const provideSeq = async (seq: number) => {
             let hashes: string[] = []
-            const r = this.db.createReadStream({
+            const iterator = this.db.iterator({
                 gt: ['seq', defined(seq, null)],
                 lt: ['seq', undefined]
             })
             let provided = 0
 
-            function flush (this: any) {
-                if (hashes.length) ex.provide(hashes)
-                hashes = []
-                if (provided === 0) done()
-            }
-
-            r.pipe(through.obj(
-                (row: any, _enc: BufferEncoding, next: () => void) => {
-                    hashes.push(row.value)
+            try {
+                for await (const [key, value] of iterator) {
+                    hashes.push(value)
                     provided++
-                    if (hashes.length >= 25) flush()
-                    next()
-                },
-                flush
-            ))
+                    if (hashes.length >= 25) {
+                        ex.provide(hashes)
+                        hashes = []
+                    }
+                }
+                // Flush any remaining hashes
+                if (hashes.length) {
+                    ex.provide(hashes)
+                }
+            } finally {
+                await iterator.close()
+            }
         }
 
         ex.on('available', async (hashes: string[]) => {
