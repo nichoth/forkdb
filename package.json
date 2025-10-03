@@ -23,9 +23,7 @@
   "scripts": {
     "lint": "eslint \"./**/*.{ts,js}\"",
     "//test": "esbuild test/index.ts --platform=node --format=esm --keep-names | node --input-type=module | tap-spec",
-    "test-compile": "echo 'No compilation needed'",
-    "test-run": "npx ts-node --esm --project tsconfig.test.json test/index.ts",
-    "test": "npm run test-compile && npm run test-run",
+    "test": "npx ts-node --esm --project tsconfig.test.json test/index.ts",
     "build-esm": "esbuild src/*.ts --format=esm --metafile=dist/meta.json --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --sourcemap && tsc --emitDeclarationOnly --project tsconfig.build.json --outDir dist",
     "build": "mkdir -p ./dist && rm -rf ./dist/* && npm run build-esm",
     "toc": "markdown-toc --maxdepth 3 -i README.md",

@@ -143,6 +143,7 @@ test('since replicate sequence', async function (t) {
     })
     ra.on('response', () => t.fail('should not get response A'))
     const rb = forkdb2.replicate({ mode: 'sync' })
+
     rb.on('available', (hs: any) => {
         t.deepEqual(hs, [hashes[3]!, hashes[4]!], 'available B')
         t.ok(true, 'available B event')
@@ -153,6 +154,7 @@ test('since replicate sequence', async function (t) {
     rb.on('response', (hash: any) => {
         t.deepEqual(hash, hashes[4]!)
     })
+
     ra.pipe(rb).pipe(ra)
 })
 
