@@ -1,27 +1,5 @@
 {
-  "compilerOptions": {
-    "module": "NodeNext",
-    "target": "ES2022",
-    "moduleResolution": "NodeNext",
-    "esModuleInterop": true,
-    "lib": ["ES2022"],
-    "allowJs": false,
-    "skipLibCheck": true,
-    "noEmit": true,
-    "allowImportingTsExtensions": true,
-    "allowSyntheticDefaultImports": true,
-    "strict": true,
-    "sourceMap": true,
-    "forceConsistentCasingInFileNames": true,
-    "noImplicitAny": false,
-    "declaration": false,
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "exactOptionalPropertyTypes": false,
-    "noImplicitReturns": false,
-    "noFallthroughCasesInSwitch": false,
-    "noUncheckedIndexedAccess": false
-  },
+  "extends": "./tsconfig.json",
   "include": [
     "test",
     "src"
