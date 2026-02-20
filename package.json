@@ -54,11 +54,14 @@
     "esbuild": "^0.25.5",
     "eslint": "^8.57.0",
     "eslint-config-standard": "^17.1.0",
+    "htm": "^3.1.1",
     "level": "^9.0.0",
     "markdown-toc": "^1.2.0",
+    "preact": "^10.28.4",
     "tap-spec": "^5.0.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
   },
   "keywords": [
     "forkdb",
