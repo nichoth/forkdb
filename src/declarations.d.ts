@@ -9,7 +9,7 @@ declare module 'content-addressable-blob-store' {
         key: string
     }
 
-    interface ReadStream extends NodeJS.ReadableStream {}
+    type ReadStream = NodeJS.ReadableStream
 
     interface BlobStore {
         createWriteStream(): WriteStream
@@ -31,7 +31,7 @@ declare module 'levelup-defaults' {
 }
 
 declare module 'hash-exchange' {
-    interface ExchangeOptions {}
+    type ExchangeOptions = Record<string, never>
 
     interface Exchange {
         id(id: string): void
@@ -125,7 +125,9 @@ declare module 'level' {
 declare module 'mkdirp' {
     function mkdirp(path: string): Promise<void>
     function mkdirp(path: string, callback: (err: any) => void): void
-    function sync(path: string): void
+    namespace mkdirp {
+        function sync(path: string): void
+    }
     export = mkdirp
 }
 

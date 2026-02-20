@@ -1,6 +1,5 @@
-import wrap from 'level-option-wrap'
 import { EventEmitter } from 'events'
-import { defined } from './index.ts'
+import { defined, wrapRangeOptions } from './util.ts'
 
 // Type definitions
 export interface FWDBOptions {
@@ -76,14 +75,14 @@ export default class FWDB extends EventEmitter {
         if (!opts) opts = {}
 
         const hash = opts.hash
-        let prev = defined(opts.prev, [])
-        if (!Array.isArray(prev)) prev = [prev]
-
         const key = opts.key
-        const prebatch = defined(
-            opts.prebatch,
-            (rows: DBRow[], done: (err: any, rows: DBRow[]) => void) => { done(null, rows) }
-        )
+        if (!hash || !key) {
+            throw new Error('Missing hash or key')
+        }
+
+        const prevValue = opts.prev ?? []
+        const prev = Array.isArray(prevValue) ? prevValue : [prevValue]
+        const prebatch = opts.prebatch ?? ((rows: DBRow[], done: (err: any, rows: DBRow[]) => void) => { done(null, rows) })
 
         const rows: DBRow[] = []
         rows.push({ type: 'put', key: ['key', key], value: 0 })
@@ -160,7 +159,7 @@ export default class FWDB extends EventEmitter {
 
     async _headsAsync (key: string, opts: any = {}): Promise<HeadsEntry[]> {
         const results: HeadsEntry[] = []
-        const iterator = this.db.iterator(wrap(opts, {
+        const iterator = this.db.iterator(wrapRangeOptions(opts, {
             gt: (x: any) => ['head', key, defined(x, null)],
             lt: (x: any) => ['head', key, defined(x, undefined)]
         }))
@@ -183,7 +182,7 @@ export default class FWDB extends EventEmitter {
 
     async _linksAsync (hash: string, opts: any = {}): Promise<LinksEntry[]> {
         const results: LinksEntry[] = []
-        const iterator = this.db.iterator(wrap(opts, {
+        const iterator = this.db.iterator(wrapRangeOptions(opts, {
             gt: (x: any) => ['link', hash, defined(x, null)],
             lt: (x: any) => ['link', hash, defined(x, undefined)]
         }))
@@ -206,7 +205,7 @@ export default class FWDB extends EventEmitter {
 
     async keys (opts: any = {}): Promise<KeysEntry[]> {
         const results: KeysEntry[] = []
-        const iterator = this.db.iterator(wrap(opts, {
+        const iterator = this.db.iterator(wrapRangeOptions(opts, {
             gt: (x: any) => ['key', defined(x, null)],
             lt: (x: any) => ['key', defined(x, undefined)]
         }))

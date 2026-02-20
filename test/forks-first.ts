@@ -2,9 +2,15 @@ import { test } from '@substrate-system/tapzero'
 import path from 'node:path'
 import level from './lib/level.js'
 import { mkdirSync } from 'node:fs'
-import concat from './lib/concat-stream.js'
 import { tmpdir } from 'node:os'
 import ForkDB from '../src/index.ts'
+
+interface ExpectedData {
+    heads:{ hash:string }[]
+    tails:{ hash:string }[]
+    list:{ hash:string, meta:{ key:string } }[]
+    links:Record<string, { key:string, hash:string }[]>
+}
 
 test('first doc', async function (t) {
     t.plan(5)
@@ -37,7 +43,7 @@ test('first doc', async function (t) {
     await check(t, fdb, expected)
 })
 
-async function check (t: any, fdb: any, expected: ExpectedData) {
+async function check (t:any, fdb:any, expected:ExpectedData) {
     const heads = await fdb.heads('blorp')
     t.deepEqual(heads, expected.heads, 'heads')
 
@@ -49,11 +55,4 @@ async function check (t: any, fdb: any, expected: ExpectedData) {
 
     const links = await fdb.linksByKey('blorp')
     t.deepEqual(links, expected.links, 'links')
-}
-
-interface ExpectedData {
-    heads: { hash: string }[]
-    tails: { hash: string }[]
-    list: { hash: string, meta: { key: string } }[]
-    links: Record<string, { key: string, hash: string }[]>
 }

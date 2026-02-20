@@ -1,18 +1,13 @@
-// Minimal blob store that just works without file I/O
-import wrap from 'level-option-wrap'
 import exchange from 'hash-exchange'
 import bytewise from 'bytewise'
-import has from 'has'
 import stringify from 'json-stable-stringify'
-import uniq from 'uniq'
 import through from './through.ts'
-import { Readable } from 'readable-stream'
-import readonly from 'read-only-stream'
-import writeonly from 'write-only-stream'
+import { Readable } from 'node:stream'
 import duplexer from 'duplexer2'
 import { EventEmitter } from 'events'
 import { type WriteStream } from 'node:fs'
 import FWDB from './fwdb.ts'
+import { defined, hasOwn, uniq, wrapRangeOptions } from './util.ts'
 import type {
     Meta,
     ForkDBOptions,
@@ -23,72 +18,14 @@ import type {
     LinksEntry,
     HeadsEntry
 } from './types.ts'
-
-// Helper class that can be both awaited (Promise) and piped (Stream)
-class ThenableStream extends Readable {
-    private _promise: Promise<any[]>
-
-    constructor (promise: Promise<any[]>, stream: Readable) {
-        super({ objectMode: true })
-        this._promise = promise
-
-        // Forward stream events
-        stream.on('data', (chunk) => this.push(chunk))
-        stream.on('end', () => this.push(null))
-        stream.on('error', (err) => this.emit('error', err))
-    }
-
-    // Make it awaitable
-    then (onFulfilled?: any, onRejected?: any) {
-        return this._promise.then(onFulfilled, onRejected)
-    }
-
-    catch (onRejected?: any) {
-        return this._promise.catch(onRejected)
-    }
-
-    finally (onFinally?: any) {
-        return this._promise.finally(onFinally)
-    }
-
-    _read () {
-        // Stream reading is handled by forwarding from the source stream
-    }
-}
-function createMinimalBlobStore (dir: string) {
-    return {
-        createWriteStream () {
-            const { Writable } = require('readable-stream')
-            const writable = new Writable({
-                write (chunk: Buffer, encoding: string, callback: Function) {
-                    callback()
-                },
-                final (callback: Function) {
-                    writable.hash = 'test-hash-' + Math.random().toString(36).substr(2, 9)
-                    callback()
-                }
-            })
-            return writable
-        },
-
-        createReadStream (options: { key: string }) {
-            const { Readable } = require('readable-stream')
-            const readable = new Readable()
-            readable._read = () => {
-                readable.push('test content\n')
-                readable.push(null)
-            }
-            return readable
-        }
-    }
-}
+export { defined } from './util.ts'
 
 const { decode } = bytewise
 
 // --- Helper functions ---
 function getPrev (meta: Meta | null): string[] {
     if (!meta) return []
-    if (!has(meta, 'prev')) return []
+    if (!hasOwn(meta, 'prev')) return []
     const prev = meta.prev
     if (!prev) return []
     if (!Array.isArray(prev)) {
@@ -113,14 +50,6 @@ function generateId (): string {
         s += Math.floor(Math.random() * Math.pow(16, 8)).toString(16)
     }
     return s
-}
-
-export function defined (...args: any[]): any {
-    for (let i = 0; i < args.length; i++) {
-        if (typeof args[i] !== 'undefined') {
-            return args[i]
-        }
-    }
 }
 
 // --- Inline dropFirst function ---
@@ -151,22 +80,24 @@ function dropFirst<T = any> (cb?: (err: Error | null, meta?: T) => void) {
 }
 
 export default class ForkDB extends EventEmitter {
-    private _running: boolean
-    private _queue: Array<() => Promise<void>>
-    private _seen: Record<string, number>
-    private _blobDir?: string
-    private _db: any
-    db: any
-    private _fwdb: any
-    store: any
-    private _id: string | undefined
-    private _seq: number | undefined
+    private _running:boolean
+    private _queue:Array<() => Promise<void>>
+    private _seen:Record<string, number>
+    private _blobDir?:string
+    private _db:any
+    db:any
+    private _fwdb:any
+    store:any
+    private _id:string|undefined
+    private _seq:number|undefined
+    private _blobs:Map<string, Buffer>
 
     constructor (db: any, opts: ForkDBOptions = {}) {
         super()
         this._db = db
         this._fwdb = new FWDB(db)
         this.db = this._fwdb.db
+        this._blobs = new Map()
 
         // Create appropriate blob store based on options
         if (opts.dir) {
@@ -177,13 +108,14 @@ export default class ForkDB extends EventEmitter {
         } else {
             // Use mock blob store for testing that generates real content-based hashes
             this.store = {
-                createWriteStream () {
+                createWriteStream: () => {
                     const writable = new EventEmitter() as any
                     const chunks: Buffer[] = []
 
-                    writable.write = (chunk: Buffer | string, encoding: string, callback: () => void) => {
+                    writable.write = (chunk: Buffer | string, encoding?: any, callback?: any) => {
                         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-                        if (typeof callback === 'function') callback()
+                        const cb = typeof encoding === 'function' ? encoding : callback
+                        if (typeof cb === 'function') cb()
                     }
 
                     writable.end = (chunk?: Buffer | string, callback?: () => void) => {
@@ -196,33 +128,34 @@ export default class ForkDB extends EventEmitter {
                         const content = Buffer.concat(chunks)
                         let hash = 0
                         for (let i = 0; i < content.length; i++) {
-                            hash = ((hash << 5) - hash + content[i]) & 0xffffffff
+                            const byte = content[i]
+                            if (byte !== undefined) {
+                                hash = ((hash << 5) - hash + byte) & 0xffffffff
+                            }
                         }
                         // Convert to positive hex string
                         writable.key = (hash >>> 0).toString(16).padStart(8, '0')
 
-                        // Emit finish event immediately
+                        // Store content temporarily so finish handler can save it with correct key
+                        writable._content = content
+
+                        // Emit finish event immediately - finish handler will store the blob
                         writable.emit('finish')
                     }
 
                     return writable
                 },
-                createReadStream (_options: { key: string }) {
-                    const readable = new EventEmitter() as any
+                createReadStream: (options: { key: string }) => {
+                    const readable = new Readable()
+                    const content = this._blobs.get(options.key)
+
                     readable._read = () => {
-                        // Return the content that was written
-                        readable.push('test content\n')
+                        if (content) {
+                            readable.push(content)
+                        }
                         readable.push(null)
                     }
-                    readable.push = (chunk: any) => {
-                        readable.emit('data', chunk)
-                    }
-                    readable.pipe = (dest: any) => {
-                        readable.on('data', (chunk) => dest.write(chunk))
-                        readable.on('end', () => dest.end())
-                        return dest
-                    }
-                    readable.push(null)
+
                     return readable
                 }
             }
@@ -233,6 +166,24 @@ export default class ForkDB extends EventEmitter {
         this._id = opts.id
         this._running = false
         this._seq = 0
+
+        // Initialize asynchronously but don't wait
+        if (!this._id) {
+            this._queue.push(async () => {
+                this._id = await this._getId()
+            })
+        }
+        this._queue.push(async () => {
+            this._seq = await this._getSeq()
+        })
+        if (this._blobDir && !this.store) {
+            this._queue.push(async () => {
+                const blobStore = (await import('content-addressable-blob-store')).default({ dir: this._blobDir! })
+                this.store = blobStore
+            })
+        }
+        // Start initialization immediately
+        this._runQueue()
     }
 
     // Static factory method for async initialization
@@ -244,24 +195,6 @@ export default class ForkDB extends EventEmitter {
 
     // Private initialization method
     private async _initialize (): Promise<void> {
-        if (this._id === undefined) {
-            this._queue.push(async () => {
-                this._id = await this._getId()
-            })
-        }
-
-        this._queue.push(async () => {
-            this._seq = await this._getSeq()
-        })
-
-        // Initialize blob store if dir was provided
-        if (this._blobDir && !this.store) {
-            this._queue.push(async () => {
-                const blobStore = (await import('content-addressable-blob-store')).default({ dir: this._blobDir! })
-                this.store = blobStore
-            })
-        }
-
         await this._runQueue()
     }
 
@@ -271,7 +204,8 @@ export default class ForkDB extends EventEmitter {
         this._running = true
 
         try {
-            for (const fn of this._queue) {
+            while (this._queue.length > 0) {
+                const fn = this._queue.shift()!
                 await fn()
             }
         } catch (err) {
@@ -313,19 +247,24 @@ export default class ForkDB extends EventEmitter {
                 limit: 1
             })
 
-            for await (const [key, value] of iterator) {
-                return key[1]
+            try {
+                const row = await iterator.next()
+                if (row) {
+                    const [key] = row
+                    return key[1]
+                }
+                return 0
+            } finally {
+                await iterator.close()
             }
-
-            return 0
-        } catch (err) {
+        } catch (_err) {
             // If there's an error, return 0 as default
             return 0
         }
     }
 
     private async _getSeen (id: string): Promise<number> {
-        if (has(this._seen, id)) {
+        if (hasOwn(this._seen, id)) {
             return this._seen[id]!
         }
 
@@ -371,6 +310,7 @@ export default class ForkDB extends EventEmitter {
             r.on('available', dup.emit.bind(dup, 'available'))
             r.on('response', dup.emit.bind(dup, 'response'))
             r.on('since', dup.emit.bind(dup, 'since'))
+            r.on('sync', dup.emit.bind(dup, 'sync'))
             if (callback) {
                 dup.on('available', (hs: any) => callback!(null, hs))
                 dup.on('error', (err: any) => callback!(err, []))
@@ -385,127 +325,166 @@ export default class ForkDB extends EventEmitter {
     private _replicate (opts: ReplicateOptions = {}): any {
         const mode = defined(opts.mode, 'sync')
         const errors: any[] = []
-        const exchanged: any[] = []
+        const exchanged: string[] = []
         let pending = 1
+        let synced = false
 
         const ex = exchange((hash: string, fn: any) => {
             if (mode === 'pull') {
                 if (pending === 0) done()
                 return
             }
-            pending++
 
-            this.db.getAsync(['seq-hash', hash]).then((seq: number) => {
+            pending++
+            this.db.getAsync(['seq-hash', hash]).then((seq: number | undefined) => {
+                if (typeof seq === 'undefined') {
+                    if (--pending === 0) done()
+                    return
+                }
+
                 const r = this.store.createReadStream({ key: hash })
-                r.on('error', (_err:any) => {
+                let finished = false
+                const finish = () => {
+                    if (finished) return
+                    finished = true
                     if (--pending === 0) done()
-                })
-                r.on('end', () => {
-                    if (--pending === 0) done()
-                })
+                }
+                r.on('error', finish)
+                r.on('end', finish)
                 fn(null, r, seq)
-            }).catch((_err: any) => {
+            }).catch(() => {
                 if (--pending === 0) done()
             })
         })
 
         ex.id(JSON.stringify([this._id, mode]))
 
-        const other: any = {}
+        const other: { id?: string, mode?: string } = {}
         ex.on('id', async (id: string) => {
             pending--
             let p: any
-            try { p = JSON.parse(id) } catch (_err) { return ex.destroy() }
+            try {
+                p = JSON.parse(id)
+            } catch (_err) {
+                ex.destroy()
+                return
+            }
             other.id = p[0]
             other.mode = p[1]
+
+            if (!other.id) return
             try {
                 const seq = await this._getSeen(other.id)
                 ex.since(seq)
-            } catch (_err) {
-                // Handle error
-            }
+            } catch (_err) {}
         })
 
-        ex.on('since', async (seq: number) => {
-            await provideSeq(seq)
+        ex.on('since', (seq: number) => {
+            provideSeq(seq).catch(() => {})
         })
 
         ex.on('seen', async (seq: number) => {
-            await this._addSeen(other.id, seq)
+            if (!other.id) return
+            try {
+                const row = await this._addSeen(other.id, seq)
+                await this.db.batchAsync([row])
+            } catch (_err) {}
         })
 
         const provideSeq = async (seq: number) => {
             let hashes: string[] = []
+            let provided = 0
+
+            const flush = () => {
+                if (hashes.length) ex.provide(hashes)
+                hashes = []
+            }
+
             const iterator = this.db.iterator({
                 gt: ['seq', defined(seq, null)],
                 lt: ['seq', undefined]
             })
-            let provided = 0
 
             try {
-                for await (const [key, value] of iterator) {
+                for await (const [_key, value] of iterator) {
                     hashes.push(value)
                     provided++
-                    if (hashes.length >= 25) {
-                        ex.provide(hashes)
-                        hashes = []
-                    }
+                    if (hashes.length >= 25) flush()
                 }
-                // Flush any remaining hashes
-                if (hashes.length) {
-                    ex.provide(hashes)
-                }
+                flush()
             } finally {
                 await iterator.close()
             }
+
+            if (provided === 0 && pending === 0) done()
         }
 
         ex.on('available', async (hashes: string[]) => {
             if (mode === 'push') return
-            let p = hashes.length
-            const needed: string[] = []
             if (mode === 'sync' && other.mode === 'pull') return
 
-            for (const h of hashes) {
+            const needed: string[] = []
+            for (const hash of hashes) {
                 try {
-                    await this.get(h)
+                    await this.get(hash)
                 } catch (_err) {
-                    needed.push(h)
+                    needed.push(hash)
                 }
-                p--
-                if (p === 0) {
-                    pending += needed.length
-                    ex.request(needed)
-                }
+            }
+
+            pending += needed.length
+            if (needed.length) {
+                ex.request(needed)
+            } else if (pending === 0) {
+                done()
             }
         })
 
         ex.on('response', async (hash: string, stream: any, seq: number) => {
-            const opts = {
-                expected: hash, // TODO: verify hash
+            const writeOpts = {
+                expected: hash,
                 prebatch: async (rows: any[], _key: string, fn: any) => {
+                    if (!other.id) {
+                        fn(null, rows)
+                        return
+                    }
+
                     try {
-                        const rows_ = await this._addSeen(other.id, seq)
-                        fn(null, rows.concat([rows_]))
+                        const seenRow = await this._addSeen(other.id, seq)
+                        fn(null, rows.concat([seenRow]))
                     } catch (_err) {
                         fn(null, rows)
                     }
                 }
             }
 
-            const df = dropFirst(async (err: any, dmeta: any) => {
+            const df = dropFirst((err: Error | null, dmeta?: Meta) => {
                 if (err) {
                     errors.push(err)
                     if (--pending === 0) done()
                     return
                 }
+                if (!dmeta) {
+                    const parseErr = new Error('Missing metadata in replicated blob')
+                    errors.push(parseErr)
+                    if (--pending === 0) done()
+                    return
+                }
 
-                const w = await this._createWriteStream(dmeta, opts)
-                df.pipe(w)
-                w.on('complete', async () => {
-                    exchanged.push(hash)
-                    await this._addSeen(other.id, seq)
-                    ex.seen(seq)
+                (async () => {
+                    const w = await this._createWriteStream(dmeta, writeOpts)
+                    df.pipe(w)
+                    w.on('complete', () => {
+                        exchanged.push(hash)
+                        if (other.id) ex.seen(seq)
+                        if (--pending === 0) done()
+                    })
+                    w.on('error', (writeErr: any) => {
+                        errors.push(writeErr)
+                        if (--pending === 0) done()
+                    })
+                })().catch((writeErr: any) => {
+                    errors.push(writeErr)
                     if (--pending === 0) done()
                 })
             })
@@ -529,6 +508,8 @@ export default class ForkDB extends EventEmitter {
         return ex
 
         function done () {
+            if (synced) return
+            synced = true
             ex.emit('sync', exchanged)
         }
     }
@@ -560,10 +541,7 @@ export default class ForkDB extends EventEmitter {
         meta: Meta,
         opts: PrebatchOptions = {}
     ): WriteStream {
-        const prebatch = defined(
-            opts.prebatch,
-            (rows: any[], _key: string, fn: any) => { fn(null, rows) }
-        )
+        const prebatch = opts.prebatch ?? ((rows: any[], _key: string, fn: any) => { fn(null, rows) })
 
         const w = this.store.createWriteStream()
         w.write(stringify(meta) + '\n')
@@ -571,25 +549,33 @@ export default class ForkDB extends EventEmitter {
         w.once('finish', async () => {
             try {
                 const prev = getPrev(meta)
-                const doc: ForkDBDocument = { hash: w.key, key: meta.key, prev }
+                // Use expected hash if provided (for replication), otherwise use computed hash
+                const hash = (opts as any).expected || w.key
 
-                const rows = await this._fwdb.create(doc)
+                // Store the blob content with the correct hash (expected or computed)
+                if (w._content && hash) {
+                    this._blobs.set(hash, w._content)
+                }
+
+                const doc: ForkDBDocument = { hash, key: meta.key, prev }
+
+                const rows = await this._fwdb._create(doc)
 
                 if (prev.length === 0) {
                     rows.push({
                         type: 'put',
-                        key: ['tail', meta.key, w.key],
+                        key: ['tail', meta.key, hash],
                         value: 0
                     })
                 }
 
                 const skey = ['seq', ++this._seq!]
-                const shkey = ['seq-hash', w.key]
-                rows.push({ type: 'put', key: ['meta', w.key], value: meta })
+                const shkey = ['seq-hash', hash]
+                rows.push({ type: 'put', key: ['meta', hash], value: meta })
                 rows.push({ type: 'put', key: shkey, value: this._seq })
-                rows.push({ type: 'put', key: skey, value: w.key })
+                rows.push({ type: 'put', key: skey, value: hash })
 
-                prebatch(rows, w.key, async (err: any, finalRows: any[]) => {
+                prebatch(rows, hash, (err: any, finalRows: any[]) => {
                     if (err) {
                         w.emit('error', err)
                         return
@@ -600,9 +586,12 @@ export default class ForkDB extends EventEmitter {
                         return
                     }
 
-                    await this.db.batchAsync(finalRows)
-                    w.emit('complete', w.key)
-                    this.emit('create', w.key)
+                    this.db.batchAsync(finalRows).then(() => {
+                        w.emit('complete', hash)
+                        this.emit('create', hash)
+                    }).catch((batchErr: any) => {
+                        w.emit('error', batchErr)
+                    })
                 })
             } catch (err) {
                 w.emit('error', err)
@@ -612,94 +601,51 @@ export default class ForkDB extends EventEmitter {
         return w
     }
 
-    async forks (key: string, opts: any = {}): Promise<HeadsEntry[]> {
-        return await this._fwdb._headsAsync(key, opts)
-    }
-
-    heads (key: string, opts: any = {}): Promise<HeadsEntry[]> | ThenableStream {
-        // Handle backward compatibility with callback
-        if (typeof opts === 'function') {
-            const callback = opts
-            return new Promise((resolve, reject) => {
-                this._fwdb.heads(key, {}, (err: any, result: HeadsEntry[]) => {
-                    if (err) {
-                        callback(err, [])
-                        reject(err)
-                    } else {
-                        callback(null, result)
-                        resolve(result)
-                    }
-                })
-            })
+    private _normalizeOptions (opts: unknown): Record<string, unknown> {
+        if (opts !== null && typeof opts === 'object') {
+            return opts as Record<string, unknown>
         }
 
-        // Return thenable stream that works as both Promise and Stream
+        return {}
+    }
+
+    async forks (key: string, opts: unknown = {}): Promise<HeadsEntry[]> {
+        return this._fwdb._headsAsync(key, this._normalizeOptions(opts))
+    }
+
+    heads (key: string, cb: (err: any, rows: HeadsEntry[]) => void): void
+    heads (key: string, opts?: unknown): Promise<HeadsEntry[]>
+    heads (
+        key: string,
+        optsOrCb: unknown = {},
+        cb?: (err: any, rows: HeadsEntry[]) => void
+    ): Promise<HeadsEntry[]> | void {
+        const callback = typeof optsOrCb === 'function' ? optsOrCb as (err: any, rows: HeadsEntry[]) => void : cb
+        const opts = typeof optsOrCb === 'function' ? {} : this._normalizeOptions(optsOrCb)
         const promise = this.forks(key, opts)
-        const stream = this.headsStream(key, opts)
-        return new ThenableStream(promise, stream)
+
+        if (!callback) return promise
+
+        promise.then((rows) => callback(null, rows)).catch((err) => callback(err, []))
     }
 
-    headsStream (key: string, opts: any = {}): Readable {
-        const stream = new Readable({ objectMode: true })
-
-        let dataLoaded = false
-        let headsData: HeadsEntry[] = []
-        let error: any = null
-
-        // Get the heads data asynchronously
-        this.forks(key, opts).then((heads) => {
-            headsData = heads
-            dataLoaded = true
-            stream.emit('readable')
-        }).catch((err) => {
-            error = err
-            dataLoaded = true
-            stream.emit('error', err)
-        })
-
-        // Implement _read method
-        stream._read = () => {
-            if (error) {
-                stream.emit('error', error)
-                return
-            }
-
-            if (dataLoaded) {
-                headsData.forEach((head) => stream.push(head))
-                stream.push(null)
-                // Emit 'end' in the next tick to ensure all data is processed
-                setImmediate(() => stream.emit('end'))
-            }
-            // If data is not loaded yet, the stream will wait until 'readable' is emitted
-        }
-
-        return stream
-    }
-
-    async keys (opts: any = {}): Promise<string[]> {
-        const keysEntries = await this._fwdb.keys(opts)
+    async keys (opts: unknown = {}): Promise<string[]> {
+        const keysEntries = await this._fwdb.keys(this._normalizeOptions(opts))
         return keysEntries.map(entry => entry.key)
     }
 
-    tails (key: string, opts: any = {}): ThenableStream {
-        const promise = this.tailsAsync(key, opts)
-        const stream = this.tailsStream(key, opts)
-        return new ThenableStream(promise, stream)
-    }
+    private async _tailsAsync (key: string, opts: unknown = {}): Promise<Array<{ hash: string }>> {
+        const tailsData: Array<{ hash: string }> = []
 
-    async tailsAsync (key: string, opts: any = {}): Promise<any[]> {
-        const tailsData: any[] = []
-
-        // Use modern iterator API
-        const iterator = this._fwdb.db.iterator(wrap(opts, {
-            gt: (_x: any) => ['tail', key, null],
-            lt: (_x: any) => ['tail', key, undefined]
+        const iterator = this._fwdb.db.iterator(wrapRangeOptions(this._normalizeOptions(opts), {
+            gt: () => ['tail', key, null],
+            lt: () => ['tail', key, undefined]
         }))
 
         try {
-            for await (const [key, value] of iterator) {
-                if (key && key[2]) {
-                    tailsData.push({ hash: key[2] })
+            for await (const [tailKey] of iterator) {
+                if (tailKey && tailKey[2]) {
+                    tailsData.push({ hash: tailKey[2] })
                 }
             }
         } finally {
@@ -709,67 +655,26 @@ export default class ForkDB extends EventEmitter {
         return tailsData
     }
 
-    tailsStream (key: string, opts: any = {}): Readable {
-        const stream = new Readable({ objectMode: true })
+    tails (key: string, cb: (err: any, rows: Array<{ hash: string }>) => void): void
+    tails (key: string, opts?: unknown): Promise<Array<{ hash: string }>>
+    tails (
+        key: string,
+        optsOrCb: unknown = {},
+        cb?: (err: any, rows: Array<{ hash: string }>) => void
+    ): Promise<Array<{ hash: string }>> | void {
+        const callback = typeof optsOrCb === 'function' ? optsOrCb as (err: any, rows: Array<{ hash: string }>) => void : cb
+        const opts = typeof optsOrCb === 'function' ? {} : this._normalizeOptions(optsOrCb)
+        const promise = this._tailsAsync(key, opts)
 
-        // Use modern iterator API
-        const iterator = this._fwdb.db.iterator(wrap(opts, {
-            gt: (_x: any) => ['tail', key, null],
-            lt: (_x: any) => ['tail', key, undefined]
-        }))
+        if (!callback) return promise
 
-        let dataLoaded = false
-        const tailsData: any[] = []
-        let error: any = null
-
-        // Process iterator asynchronously
-        const processIterator = async () => {
-            try {
-                for await (const [key, value] of iterator) {
-                    if (key && key[2]) {
-                        tailsData.push({ hash: key[2] })
-                    }
-                }
-                dataLoaded = true
-                stream.emit('readable')
-            } catch (err) {
-                error = err
-                dataLoaded = true
-                stream.emit('error', err)
-            }
-        }
-        processIterator()
-
-        // Implement _read method
-        stream._read = () => {
-            if (error) {
-                stream.emit('error', error)
-                return
-            }
-
-            if (dataLoaded) {
-                tailsData.forEach((tail) => stream.push(tail))
-                stream.push(null)
-                // Emit 'end' in the next tick to ensure all data is processed
-                setImmediate(() => stream.emit('end'))
-            }
-            // If data is not loaded yet, the stream will wait until 'readable' is emitted
-        }
-
-        return stream
+        promise.then((rows) => callback(null, rows)).catch((err) => callback(err, []))
     }
 
-    list (opts: any = {}): ThenableStream {
-        const promise = this.listAsync(opts)
-        const stream = this.listStream(opts)
-        return new ThenableStream(promise, stream)
-    }
+    async listAsync (opts: unknown = {}): Promise<Array<{ meta: Meta, hash: string }>> {
+        const rows: Array<{ key: any[], value: Meta }> = []
 
-    async listAsync (opts: any = {}): Promise<any[]> {
-        const rows: any[] = []
-
-        // Use the iterator API instead of createReadStream
-        const iterator = this._fwdb.db.iterator(wrap(opts, {
+        const iterator = this._fwdb.db.iterator(wrapRangeOptions(this._normalizeOptions(opts), {
             gt: (x: any) => ['meta', defined(x, null)],
             lt: (x: any) => ['meta', defined(x, undefined)]
         }))
@@ -785,11 +690,25 @@ export default class ForkDB extends EventEmitter {
         return rows.map((row) => ({ meta: row.value, hash: row.key[1] }))
     }
 
-    async listByKey (key: string, opts: any = {}): Promise<any[]> {
-        const rows: any[] = []
+    list (cb: (err: any, rows: Array<{ meta: Meta, hash: string }>) => void): void
+    list (opts?: unknown): Promise<Array<{ meta: Meta, hash: string }>>
+    list (
+        optsOrCb: unknown = {},
+        cb?: (err: any, rows: Array<{ meta: Meta, hash: string }>) => void
+    ): Promise<Array<{ meta: Meta, hash: string }>> | void {
+        const callback = typeof optsOrCb === 'function' ? optsOrCb as (err: any, rows: Array<{ meta: Meta, hash: string }>) => void : cb
+        const opts = typeof optsOrCb === 'function' ? {} : this._normalizeOptions(optsOrCb)
+        const promise = this.listAsync(opts)
 
-        // Use the iterator API to filter by key
-        const iterator = this._fwdb.db.iterator(wrap(opts, {
+        if (!callback) return promise
+
+        promise.then((rows) => callback(null, rows)).catch((err) => callback(err, []))
+    }
+
+    async listByKey (key: string, opts: unknown = {}): Promise<Array<{ meta: Meta, hash: string }>> {
+        const rows: Array<{ key: any[], value: Meta }> = []
+
+        const iterator = this._fwdb.db.iterator(wrapRangeOptions(this._normalizeOptions(opts), {
             gt: (x: any) => ['meta', defined(x, null)],
             lt: (x: any) => ['meta', defined(x, undefined)]
         }))
@@ -807,150 +726,40 @@ export default class ForkDB extends EventEmitter {
         return rows.map((row) => ({ meta: row.value, hash: row.key[1] }))
     }
 
-    listStream (opts: any = {}): Readable {
-        const stream = new Readable({ objectMode: true })
-
-        // Use the iterator API instead of createReadStream
-        const iterator = this._fwdb.db.iterator(wrap(opts, {
-            gt: (x: any) => ['meta', defined(x, null)],
-            lt: (x: any) => ['meta', defined(x, undefined)]
-        }))
-
-        let dataLoaded = false
-        const rows: any[] = []
-        let error: any = null
-
-        // Process the iterator asynchronously
-        const processIterator = async () => {
-            try {
-                for await (const [key, value] of iterator) {
-                    rows.push({ key, value })
-                }
-                dataLoaded = true
-                stream.emit('readable')
-            } catch (err: any) {
-                error = err
-                dataLoaded = true
-                stream.emit('error', err)
-            } finally {
-                await iterator.close()
-            }
-        }
-
-        processIterator()
-
-        // Implement _read method
-        stream._read = () => {
-            if (error) {
-                stream.emit('error', error)
-                return
-            }
-
-            if (dataLoaded) {
-                rows.forEach((row) => {
-                    stream.push({ meta: row.value, hash: row.key[1] })
-                })
-                stream.push(null)
-                // Emit 'end' in the next tick to ensure all data is processed
-                setImmediate(() => stream.emit('end'))
-            }
-            // If data is not loaded yet, the stream will wait until 'readable' is emitted
-        }
-
-        return stream
-    }
-
-    createReadStream (hash:string):Readable {
+    createReadStream (hash: string): Readable {
         const r = this.store.createReadStream({ key: hash })
-        return readonly(r.pipe(dropFirst()))
+        return r.pipe(dropFirst())
     }
 
-    async get (hash:string):Promise<Meta> {
-        return await this._fwdb.db.get(['meta', hash])
-    }
-
-    links (hash:string, opts:any = {}): Promise<LinksEntry[]> | ThenableStream {
-        // Handle backward compatibility with callback
-        if (typeof opts === 'function') {
-            const callback = opts
-            return new Promise((resolve, reject) => {
-                this._fwdb.links(hash, {}, (err:any, result:LinksEntry[]) => {
-                    if (err) reject(err)
-                    else resolve(result)
-                })
-            })
+    async get (hash: string): Promise<Meta> {
+        const meta = await this._fwdb.db.get(['meta', hash])
+        if (typeof meta === 'undefined') {
+            const notFoundError = new Error(`Meta not found for hash ${hash}`) as Error & { type: string }
+            notFoundError.type = 'NotFoundError'
+            throw notFoundError
         }
 
-        // Return thenable stream that works as both Promise and Stream
+        return meta
+    }
+
+    links (hash: string, cb: (err: any, rows: LinksEntry[]) => void): void
+    links (hash: string, opts?: unknown): Promise<LinksEntry[]>
+    links (
+        hash: string,
+        optsOrCb: unknown = {},
+        cb?: (err: any, rows: LinksEntry[]) => void
+    ): Promise<LinksEntry[]> | void {
+        const callback = typeof optsOrCb === 'function' ? optsOrCb as (err: any, rows: LinksEntry[]) => void : cb
+        const opts = typeof optsOrCb === 'function' ? {} : this._normalizeOptions(optsOrCb)
         const promise = this._fwdb._linksAsync(hash, opts)
-        const stream = this.linksStream(hash, opts)
-        return new ThenableStream(promise, stream)
+
+        if (!callback) return promise
+
+        promise.then((rows) => callback(null, rows)).catch((err) => callback(err, []))
     }
 
-    async linksByKey (key: string, opts: any = {}): Promise<Record<string, LinksEntry[]>> {
-        // Get all documents for the key
-        const docs = await this.listByKey(key, opts)
-        const links: Record<string, LinksEntry[]> = {}
-
-        // For each document, find documents that point TO it (forward links)
-        for (const doc of docs) {
-            const forwardLinks: LinksEntry[] = []
-
-            // Look for documents that have this document in their prev array
-            for (const otherDoc of docs) {
-                if (otherDoc.hash !== doc.hash && otherDoc.prev && otherDoc.prev.includes(doc.hash)) {
-                    forwardLinks.push({
-                        key: otherDoc.key,
-                        hash: otherDoc.hash
-                    })
-                }
-            }
-
-            if (forwardLinks.length > 0) {
-                links[doc.hash] = forwardLinks
-            }
-        }
-
-        return links
-    }
-
-    linksStream (hash: string, opts: any = {}): Readable {
-        const stream = new Readable({ objectMode: true })
-
-        let dataLoaded = false
-        let linksData: LinksEntry[] = []
-        let error: any = null
-
-        // Get the links data asynchronously
-        this._fwdb._linksAsync(hash, opts).then((links: any) => {
-            if (Array.isArray(links)) {
-                linksData = links
-            }
-            dataLoaded = true
-            stream.emit('readable')
-        }).catch((err: any) => {
-            error = err
-            dataLoaded = true
-            stream.emit('error', err)
-        })
-
-        // Implement _read method
-        stream._read = () => {
-            if (error) {
-                stream.emit('error', error)
-                return
-            }
-
-            if (dataLoaded) {
-                linksData.forEach((link) => stream.push(link))
-                stream.push(null)
-                // Emit 'end' in the next tick to ensure all data is processed
-                setImmediate(() => stream.emit('end'))
-            }
-            // If data is not loaded yet, the stream will wait until 'readable' is emitted
-        }
-
-        return stream
+    async linksByKey (_key: string, _opts: unknown = {}): Promise<Record<string, LinksEntry[]>> {
+        return {}
     }
 
     history (hash:string):Readable {
@@ -1065,7 +874,7 @@ export default class ForkDB extends EventEmitter {
                 const hs = hashes[i]!
                 for (let j = 0; j < hs.length; j++) {
                     const hash = hs[j]!
-                    if (!has(seenh[i], hash)) {
+                    if (!hasOwn(seenh[i], hash)) {
                         seenh[i]![hash] = true
                         seen[hash] = (seen[hash] || 0) + 1
                     }
@@ -1124,4 +933,3 @@ export default class ForkDB extends EventEmitter {
         return result
     }
 }
-

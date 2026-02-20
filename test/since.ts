@@ -94,19 +94,55 @@ test('populate push sync', async function (t) {
 
 test('since', async function (t) {
     t.plan(2)
-    const ra = forkdb1.replicate({ mode: 'sync' })
-    ra.on('available', (_hs: any) => {
-        t.ok(true, 'sync mode a completed')
+
+    // Debug: check what's in each database before replication
+    console.log('\n=== Before first replication ===')
+    const list1 = await forkdb1.listByKey('blorp')
+    const list2 = await forkdb2.listByKey('blorp')
+    console.log('forkdb1 listByKey:', list1.map((d: any) => d.hash))
+    console.log('forkdb2 listByKey:', list2.map((d: any) => d.hash))
+    console.log('forkdb1 ID:', (forkdb1 as any)._id)
+    console.log('forkdb2 ID:', (forkdb2 as any)._id)
+
+    // Check raw database contents
+    for (const hash of hashes) {
+        try {
+            await forkdb1.get(hash)
+            console.log(`forkdb1 has ${hash} in database`)
+        } catch {}
+        try {
+            await forkdb2.get(hash)
+            console.log(`forkdb2 has ${hash} in database`)
+        } catch {}
+    }
+
+    await new Promise<void>((resolve) => {
+        let completed = 0
+        const checkDone = () => {
+            if (++completed === 2) resolve()
+        }
+
+        const ra = forkdb1.replicate({ mode: 'sync' })
+        ra.on('sync', () => {
+            t.ok(true, 'sync mode a completed')
+            checkDone()
+        })
+
+        const rb = forkdb2.replicate({ mode: 'sync' })
+        rb.on('sync', () => {
+            t.ok(true, 'sync mode b completed')
+            checkDone()
+        })
+
+        ra.pipe(rb).pipe(ra)
     })
-    const rb = forkdb2.replicate({ mode: 'sync' })
-    rb.on('available', (_hs: any) => {
-        t.ok(true, 'sync mode b completed')
-    })
-    ra.pipe(rb).pipe(ra)
 })
 
 test('since verify', async function (t) {
     t.plan(4)
+
+    // Add delay to let async operations complete
+    await new Promise(resolve => setTimeout(resolve, 500))
 
     forkdb1.heads('blorp', (err: any, hs: any) => {
         t.ifError(err)
@@ -133,29 +169,39 @@ test('since add another', async function (t) {
 
 test('since replicate sequence', async function (t) {
     t.plan(7)
-    const ra = forkdb1.replicate({ mode: 'sync' })
-    ra.on('available', (hs: any) => {
-        t.deepEqual(hs, [hashes[0]!])
-        t.ok(true, 'available A event')
-    })
-    ra.on('since', (seq: any) => {
-        t.equal(seq, 3, 'since A')
-    })
-    ra.on('response', () => t.fail('should not get response A'))
-    const rb = forkdb2.replicate({ mode: 'sync' })
 
-    rb.on('available', (hs: any) => {
-        t.deepEqual(hs, [hashes[3]!, hashes[4]!], 'available B')
-        t.ok(true, 'available B event')
-    })
-    rb.on('since', (seq: any) => {
-        t.equal(seq, 3, 'since B')
-    })
-    rb.on('response', (hash: any) => {
-        t.deepEqual(hash, hashes[4]!)
-    })
+    await new Promise<void>((resolve) => {
+        let completed = 0
+        const checkDone = () => {
+            if (++completed === 2) resolve()
+        }
 
-    ra.pipe(rb).pipe(ra)
+        const ra = forkdb1.replicate({ mode: 'sync' })
+        ra.on('available', (hs: any) => {
+            t.deepEqual(hs, [hashes[0]!])
+            t.ok(true, 'available A event')
+        })
+        ra.on('since', (seq: any) => {
+            t.equal(seq, 3, 'since A')
+        })
+        ra.on('response', () => t.fail('should not get response A'))
+        ra.on('sync', checkDone)
+
+        const rb = forkdb2.replicate({ mode: 'sync' })
+        rb.on('available', (hs: any) => {
+            t.deepEqual(hs, [hashes[3]!, hashes[4]!], 'available B')
+            t.ok(true, 'available B event')
+        })
+        rb.on('since', (seq: any) => {
+            t.equal(seq, 3, 'since B')
+        })
+        rb.on('response', (hash: any) => {
+            t.deepEqual(hash, hashes[4]!)
+        })
+        rb.on('sync', checkDone)
+
+        ra.pipe(rb).pipe(ra)
+    })
 })
 
 test('since verify after', async function (t) {
