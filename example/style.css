@@ -35,6 +35,7 @@ body {
 .app-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
+    grid-auto-rows: 32rem;
     gap: 2rem;
     align-items: start;
 }
@@ -46,6 +47,8 @@ body {
 
 header.app-header {
     margin-top: 2rem;
+    display: flex;
+    justify-content: space-between;
 
     & h1 {
         margin-bottom: 1rem;
@@ -68,6 +71,11 @@ substrate-button button.reset-btn {
     background: var(--surface);
     cursor: pointer;
     border-color: var(--danger);
+
+    &:hover {
+        border-color: var(--danger);
+        outline-color: var(--danger);
+    }
 }
 
 /* ---- create form ---- */

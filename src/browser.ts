@@ -63,8 +63,8 @@ function hasPrefix (key:unknown, prefix:string[]):key is string[] {
 
 export class BrowserForkDB {
     private db:BrowserLevel<unknown, unknown>
-    private _id:string
     private _name:string
+    _id:string
 
     constructor (name = 'forkdb') {
         this.db = new BrowserLevel(name, {
