@@ -170,37 +170,50 @@ export const MerkleDag:FunctionComponent<{
                                 `
                             })}
 
-                            ${dag.points.map((point) => html`
-                                <g
-                                    key=${point.hash}
-                                    class="dag-node-group"
-                                    onClick=${() => onSelect(point.hash)}
-                                >
-                                    <circle
-                                        class=${selectedHash === point.hash ? 'dag-node dag-node-selected' : 'dag-node'}
-                                        cx=${point.x}
-                                        cy=${point.y}
-                                        r=${36}
-                                    />
-                                    <text
-                                        class="dag-node-label"
-                                        x=${point.x}
-                                        y=${point.y}
-                                        text-anchor="middle"
-                                        dominant-baseline="central"
+                            ${dag.points.map((point) => {
+                                const label = point.hash.slice(0, 4)
+                                const key = point.key
+                                const keyBgWidth = Math.max(48, key.length * 12)
+                                return html`
+                                    <g
+                                        key=${point.hash}
+                                        class="dag-node-group"
+                                        onClick=${() => onSelect(point.hash)}
                                     >
-                                        ${point.hash.slice(0, 4)}
-                                    </text>
-                                    <text
-                                        class="dag-node-key"
-                                        x=${point.x}
-                                        y=${point.y + 56}
-                                        text-anchor="middle"
-                                    >
-                                        ${point.key}
-                                    </text>
-                                </g>
-                            `)}
+                                        <circle
+                                            class=${selectedHash === point.hash ? 'dag-node dag-node-selected' : 'dag-node'}
+                                            cx=${point.x}
+                                            cy=${point.y}
+                                            r=${36}
+                                        />
+                                        <text
+                                            class="dag-node-label"
+                                            x=${point.x}
+                                            y=${point.y}
+                                            text-anchor="middle"
+                                            dominant-baseline="central"
+                                        >
+                                            ${label}
+                                        </text>
+                                        <rect
+                                            class="dag-node-key-bg"
+                                            x=${point.x - (keyBgWidth / 2)}
+                                            y=${point.y + 40}
+                                            width=${keyBgWidth}
+                                            height=${24}
+                                        />
+                                        <text
+                                            class="dag-node-key"
+                                            x=${point.x}
+                                            y=${point.y + 56}
+                                            dominant-baseline="middle"
+                                            text-anchor="middle"
+                                        >
+                                            ${key}
+                                        </text>
+                                    </g>
+                                `
+                            })}
                         </svg>
                     </div>
                 `}

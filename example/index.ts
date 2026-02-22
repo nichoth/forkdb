@@ -65,11 +65,20 @@ export const App:FunctionComponent = function App () {
             </header>
 
             <div class="app-grid">
-                <section class="left-column">
-                    <${CreateForm} onCreated=${refresh} />
+                <${CreateForm} onCreated=${refresh} />
 
+                <${MerkleDag}
+                    nodes=${nodes.value}
+                    selectedHash=${selectedHash.value}
+                    onSelect=${selectHash}
+                />
+
+                <section class="heads-panel">
                     <section class="heads-section">
                         <h2>Heads</h2>
+                        ${Object.keys(headMap.value).length === 0 && html`
+                            <p class="empty-state">No heads yet.</p>
+                        `}
                         ${Object.entries(headMap.value).map(([key, hashes]) => html`
                             <div class="heads-row" key=${key}>
                                 <span class="node-key">${key}</span>
@@ -85,7 +94,9 @@ export const App:FunctionComponent = function App () {
                             </div>
                         `)}
                     </section>
+                </section>
 
+                <section class="nodes-panel">
                     <section class="nodes-section">
                         <h2>All nodes</h2>
                         ${nodes.value.length === 0 && html`
@@ -108,14 +119,6 @@ export const App:FunctionComponent = function App () {
                             onSelect=${selectHash}
                         />
                     `}
-                </section>
-
-                <section class="right-column">
-                    <${MerkleDag}
-                        nodes=${nodes.value}
-                        selectedHash=${selectedHash.value}
-                        onSelect=${selectHash}
-                    />
                 </section>
             </div>
         </div>

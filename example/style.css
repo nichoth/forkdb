@@ -37,22 +37,18 @@ body {
     grid-template-columns: 1fr 1fr;
     grid-auto-rows: 32rem;
     gap: 2rem;
-    align-items: start;
+    align-items: stretch;
 }
 
-.right-column {
-    max-height: 80vh;
-    overflow-y: auto;
+.app-grid > * {
+    min-height: 0;
 }
 
 header.app-header {
     margin-top: 2rem;
     display: flex;
     justify-content: space-between;
-
-    & h1 {
-        margin-bottom: 1rem;
-    }
+    align-items: baseline;
 }
 
 .subtitle {
@@ -65,7 +61,6 @@ button {
 }
 
 substrate-button button.reset-btn {
-    margin-top: 1rem;
     padding: 1rem;
     border: 1px solid var(--border);
     background: var(--surface);
@@ -83,7 +78,9 @@ substrate-button button.reset-btn {
     background: var(--surface);
     border: 1px solid var(--border);
     padding: 1rem;
-    margin-bottom: 2rem;
+    margin-bottom: 0;
+    height: 100%;
+    overflow-y: auto;
 }
 
 .create-form h2 {
@@ -119,8 +116,17 @@ substrate-button button.create-submit {
 }
 
 /* ---- heads section ---- */
+.heads-panel,
+.nodes-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 1rem;
+    height: 100%;
+    overflow-y: auto;
+}
+
 .heads-section {
-    margin-bottom: 2rem;
+    margin-bottom: 0;
 }
 
 .heads-section h2 {
@@ -210,7 +216,7 @@ substrate-button button.hash-link:hover {
 
 /* ---- history panel ---- */
 .history-panel {
-    margin-top: 2rem;
+    margin-top: 1rem;
     background: var(--surface);
     border: 1px solid var(--border);
     padding: 1rem;
@@ -242,6 +248,10 @@ substrate-button button.hash-link:hover {
     background: var(--surface);
     border: 1px solid var(--border);
     padding: 1rem;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 .dag-section h2 {
@@ -250,7 +260,8 @@ substrate-button button.hash-link:hover {
 
 .dag-scroll {
     padding: 1rem;
-    max-height: 70vh;
+    flex: 1;
+    min-height: 0;
     overflow-x: auto;
     overflow-y: auto;
 }
@@ -280,6 +291,10 @@ substrate-button button.hash-link:hover {
 
 .dag-node-label {
     font-family: var(--mono);
+}
+
+.dag-node-key-bg {
+    fill: #fff;
 }
 
 .dag-node-key {
