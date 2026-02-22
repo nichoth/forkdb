@@ -5,7 +5,6 @@ import { useSignal } from '@preact/signals'
 import { useCallback, useEffect } from 'preact/hooks'
 import { CreateForm } from './components/create-form.js'
 import { NodeCard } from './components/node-card.js'
-import { HistoryPanel } from './components/history-panel.js'
 import { MerkleDag } from './components/merkle-dag.js'
 import { forkdb } from './db.js'
 import { type NodeDetail } from './state.js'
@@ -50,6 +49,10 @@ export const App:FunctionComponent = function App () {
         await forkdb.destroy()
         window.location.reload()
     }, [])
+
+    const selectedNode = selectedHash.value
+        ? nodes.value.find((node) => node.hash === selectedHash.value) ?? null
+        : null
 
     return html`
         <div class="app">
@@ -97,28 +100,27 @@ export const App:FunctionComponent = function App () {
                 </section>
 
                 <section class="nodes-panel">
-                    <section class="nodes-section">
-                        <h2>All nodes</h2>
-                        ${nodes.value.length === 0 && html`
-                            <p class="empty-state">
-                                No documents yet. Create one above.
-                            </p>
+                    ${selectedNode
+                        ? html`
+                            <pre class="selected-node-json">${JSON.stringify(selectedNode, null, 2)}</pre>
+                        `
+                        : html`
+                            <section class="nodes-section">
+                                <h2>All nodes</h2>
+                                ${nodes.value.length === 0 && html`
+                                    <p class="empty-state">
+                                        No documents yet. Create one above.
+                                    </p>
+                                `}
+                                ${nodes.value.map((node) => html`
+                                    <${NodeCard}
+                                        key=${node.hash}
+                                        node=${node}
+                                        onSelect=${selectHash}
+                                    />
+                                `)}
+                            </section>
                         `}
-                        ${nodes.value.map((node) => html`
-                            <${NodeCard}
-                                key=${node.hash}
-                                node=${node}
-                                onSelect=${selectHash}
-                            />
-                        `)}
-                    </section>
-
-                    ${selectedHash.value && html`
-                        <${HistoryPanel}
-                            hash=${selectedHash.value}
-                            onSelect=${selectHash}
-                        />
-                    `}
                 </section>
             </div>
         </div>

@@ -149,6 +149,12 @@ substrate-button button.create-submit {
     margin-bottom: 1rem;
 }
 
+.selected-node-json {
+    margin: 0;
+    white-space: pre;
+    overflow: auto;
+}
+
 .empty-state {
     color: var(--text-secondary);
 }
