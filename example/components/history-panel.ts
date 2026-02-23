@@ -4,6 +4,7 @@ import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { type NodeEntry } from '../../src/browser.js'
 import { forkdb } from '../index.js'
+import { shortHash } from '../hash.js'
 
 export const HistoryPanel:FunctionComponent<{
     hash:string
@@ -27,15 +28,16 @@ export const HistoryPanel:FunctionComponent<{
 
     return html`
         <aside class="history-panel">
-            <h3>History from ${hash}</h3>
+            <h3>History from ${shortHash(hash)}</h3>
             <ol>
                 ${history.value.map((entry) => html`
                     <li key=${entry.hash}>
                         <substrate-button
                             class="hash-link"
+                            title=${entry.hash}
                             onClick=${() => onSelect(entry.hash)}
                         >
-                            ${entry.hash}
+                            ${shortHash(entry.hash)}
                         </substrate-button>
                         <span class="history-key">${entry.meta.key}</span>
                     </li>

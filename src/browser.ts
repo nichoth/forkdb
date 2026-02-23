@@ -6,6 +6,7 @@
  * (IndexedDB).  No Node.js streams or Buffer polyfills required.
  */
 import { BrowserLevel } from 'browser-level'
+import { toHex } from './util.ts'
 
 // ---- types ----------------------------------------------------------------
 
@@ -29,34 +30,6 @@ export interface NodeEntry {
 export interface LinksEntry {
     key:string
     hash:string
-}
-
-// ---- helpers ---------------------------------------------------------------
-
-/**
- * Simple content hash (not cryptographic – fine for a demo).
- */
-function contentHash (input:string):string {
-    let h = 0x811c9dc5   // FNV offset basis
-    for (let i = 0; i < input.length; i++) {
-        h ^= input.charCodeAt(i)
-        h = Math.imul(h, 0x01000193)  // FNV prime
-    }
-    return (h >>> 0).toString(16).padStart(8, '0')
-}
-
-function getPrev (meta:Meta):string[] {
-    if (!meta.prev) return []
-    return meta.prev.filter(Boolean)
-}
-
-function hasPrefix (key:unknown, prefix:string[]):key is string[] {
-    if (!Array.isArray(key)) return false
-    if (key.length < prefix.length) return false
-    for (let i = 0; i < prefix.length; i++) {
-        if (key[i] !== prefix[i]) return false
-    }
-    return true
 }
 
 // ---- BrowserForkDB ---------------------------------------------------------
@@ -93,7 +66,7 @@ export class BrowserForkDB {
     async put (meta:Meta, body = ''):Promise<string> {
         const prev = getPrev(meta)
         const hashInput = JSON.stringify({ key: meta.key, prev, body })
-        const hash = contentHash(hashInput)
+        const hash = await contentHash(hashInput)
 
         const ops:Array<{ type:'put'|'del', key:string[], value?:unknown }> = []
 
@@ -237,13 +210,41 @@ export class BrowserForkDB {
      * Delete the IndexedDB database entirely.
      */
     async destroy ():Promise<void> {
-        await this.close()
-        // browser-level stores data in an IndexedDB database named after
-        // the constructor argument.
-        const req = indexedDB.deleteDatabase(this._name)
-        await new Promise<void>((resolve, reject) => {
-            req.onsuccess = () => resolve()
-            req.onerror = () => reject(req.error)
-        })
+        if (this.db.status === 'open' || this.db.status === 'opening') {
+            await this.close()
+        }
+        await BrowserLevel.destroy(this._name, this.db.namePrefix)
     }
+}
+
+// ---- helpers ---------------------------------------------------------------
+
+async function contentHash (input:string):Promise<string> {
+    if (globalThis.crypto?.subtle) {
+        const bytes = new TextEncoder().encode(input)
+        const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes)
+        return toHex(new Uint8Array(digest))
+    }
+
+    // Fallback for environments without Web Crypto.
+    let h = 0x811c9dc5   // FNV offset basis
+    for (let i = 0; i < input.length; i++) {
+        h ^= input.charCodeAt(i)
+        h = Math.imul(h, 0x01000193)  // FNV prime
+    }
+    return (h >>> 0).toString(16).padStart(8, '0')
+}
+
+function getPrev (meta:Meta):string[] {
+    if (!meta.prev) return []
+    return meta.prev.filter(Boolean)
+}
+
+function hasPrefix (key:unknown, prefix:string[]):key is string[] {
+    if (!Array.isArray(key)) return false
+    if (key.length < prefix.length) return false
+    for (let i = 0; i < prefix.length; i++) {
+        if (key[i] !== prefix[i]) return false
+    }
+    return true
 }

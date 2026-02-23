@@ -72,14 +72,14 @@ npm install forkdb
 Here we'll create a new document with the contents `beep boop` under the key
 `"blorp"`.
 
-```
+```sh
 $ echo beep boop | forkdb create blorp
 9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0
 ```
 
 This document is now the singular head of the blorp key:
 
-```
+```sh
 $ forkdb forks blorp
 9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0
 ```
@@ -87,13 +87,13 @@ $ forkdb forks blorp
 But now, we'll make a new document that links back to the document we just
 created and see that the head has updated to the new document's hash:
 
-```
+```sh
 $ echo BEEP BOOP | forkdb create blorp \
   --prev=9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0
 f5ff29843ef0658e2a1e14ed31198807ce8302936116545928756844be45fe41
 ```
 
-```
+```sh
 $ forkdb forks blorp
 f5ff29843ef0658e2a1e14ed31198807ce8302936116545928756844be45fe41
 ```
@@ -102,7 +102,7 @@ But suppose that while we were making our `BEEP BOOP` update, somebody else was
 working on an edit to the same previous hash, 9c056451. In other words, a
 conflict!
 
-```
+```sh
 $ echo BeEp BoOp | forkdb create blorp \
   --prev=9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0
 6c0c881fad7adb3fec52b75ab0de8670391ceb8847c8e4c3a2dce9a56244b328
@@ -111,7 +111,7 @@ $ echo BeEp BoOp | forkdb create blorp \
 This is no problem for forkdb. There are just 2 forks of the `blorp` key now,
 which is completely fine:
 
-```
+```sh
 $ forkdb forks blorp
 6c0c881fad7adb3fec52b75ab0de8670391ceb8847c8e4c3a2dce9a56244b328
 f5ff29843ef0658e2a1e14ed31198807ce8302936116545928756844be45fe41
@@ -123,7 +123,7 @@ branch where the files diverge.
 However, we can also merge these 2 documents back into 1 by creating a new
 document that points back at both forks:
 
-```
+```sh
 $ echo BEEPITY BOOPITY | forkdb create blorp \
   --prev=6c0c881fad7adb3fec52b75ab0de8670391ceb8847c8e4c3a2dce9a56244b328 \
   --prev=f5ff29843ef0658e2a1e14ed31198807ce8302936116545928756844be45fe41
@@ -132,7 +132,7 @@ $ echo BEEPITY BOOPITY | forkdb create blorp \
 
 and now we're back to a single head:
 
-```
+```sh
 $ forkdb forks blorp
 058647fc544f70a96d5d083ae7e3c373b441fc3d55b993407254fcce3c732f1e
 ```
@@ -141,7 +141,7 @@ However, all of the previous states of the blorp key were saved into the
 history, which we can inspect by picking a key (in this case, the new head
 e3bd9d14) and traversing back through the branches to end up at the tail:
 
-```
+```sh
 $ forkdb history 058647fc544f70a96d5d083ae7e3c373b441fc3d55b993407254fcce3c732f1e
 +- blorp :: 058647fc544f70a96d5d083ae7e3c373b441fc3d55b993407254fcce3c732f1e
  +- blorp :: 6c0c881fad7adb3fec52b75ab0de8670391ceb8847c8e4c3a2dce9a56244b328
@@ -154,12 +154,14 @@ $ forkdb history 058647fc544f70a96d5d083ae7e3c373b441fc3d55b993407254fcce3c732f1
 
 First, we'll populate two databases, `/tmp/a` and `/tmp/b` with some data:
 
-```
+```sh
 $ echo beep boop | forkdb -d /tmp/a create msg
 0673a2977261a9413b8a1abe8389b7c6ef327b319f60f814dece9617d43465c0
+
 $ echo RAWR | forkdb -d /tmp/a create msg \
   --prev=0673a2977261a9413b8a1abe8389b7c6ef327b319f60f814dece9617d43465c0
 071f8d4403f88ca431023ec12a277b28bcd68ab41c5043a5bf7e690b23ba7184
+
 $ echo moo | forkdb -d /tmp/b create msg \
   --prev=0673a2977261a9413b8a1abe8389b7c6ef327b319f60f814dece9617d43465c0
 e708cc6e5114ac184e0cf81aca203ddd6b02a599d9d85ac756b37b9b19cd4fae
@@ -168,7 +170,7 @@ e708cc6e5114ac184e0cf81aca203ddd6b02a599d9d85ac756b37b9b19cd4fae
 Now we can use [dupsh](https://npmjs.org/package/dupsh) to pipe replication
 endpoints for `/tmp/a` and `/tmp/b` together:
 
-```
+```sh
 $ dupsh 'forkdb sync -d /tmp/a' 'forkdb sync -d /tmp/b'
 ```
 
@@ -177,19 +179,19 @@ stdout. You can sync two forkdbs over the network with any duplex transport.
 
 For example, with netcat we can create a server on port 5000:
 
-```
+```sh
 $ dupsh 'forkdb sync -d /tmp/a' 'nc -l 5000'
 ```
 
 and then elsewhere we can connect to port 5000 for replication:
 
-```
+```sh
 $ dupsh 'forkdb sync -d /tmp/b' 'nc localhost 5000'
 ```
 
 No matter how you get the data to each database, everything is now in sync!
 
-```
+```sh
 $ forkdb -d /tmp/a forks msg
 071f8d4403f88ca431023ec12a277b28bcd68ab41c5043a5bf7e690b23ba7184
 e708cc6e5114ac184e0cf81aca203ddd6b02a599d9d85ac756b37b9b19cd4fae
@@ -200,7 +202,7 @@ e708cc6e5114ac184e0cf81aca203ddd6b02a599d9d85ac756b37b9b19cd4fae
 
 If we make a merge update on `/tmp/b`:
 
-```
+```sh
 $ echo woop | forkdb -d /tmp/b create msg \
   --prev=071f8d4403f88ca431023ec12a277b28bcd68ab41c5043a5bf7e690b23ba7184 \
   --prev=e708cc6e5114ac184e0cf81aca203ddd6b02a599d9d85ac756b37b9b19cd4fae
@@ -209,13 +211,13 @@ $ echo woop | forkdb -d /tmp/b create msg \
 
 and then merge again:
 
-```
+```sh
 $ dupsh 'forkdb sync -d /tmp/a' 'forkdb sync -d /tmp/b'
 ```
 
 now the data is merged on both databases:
 
-```
+```sh
 $ forkdb -d /tmp/a forks msg
 7e38e3a49db243c39b86e8b17535745b8967b914b5aeaf442c8fac9f3e6a7b8b
 $ forkdb -d /tmp/b forks msg
@@ -230,7 +232,7 @@ Create a forkdb instance by passing in a leveldown or levelup handle and a path
 to where the blobs should go. Then you can use `createWriteStream(meta)` to
 save some data:
 
-``` js
+```js
 var db = require('level')('/tmp/edit.db');
 var fdb = require('forkdb')(db, { dir: '/tmp/edit.blob' });
 
@@ -245,7 +247,7 @@ process.stdin.pipe(w);
 
 Now give the program some data on `stdin`:
 
-```
+```sh
 $ echo beep boop | node create.js '{"key":"blorp"}'
 9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0
 ```
@@ -279,7 +281,7 @@ slowly, from the backward links.
 
 ## Methods
 
-``` js
+```js
 var forkdb = require('forkdb')
 ```
 
@@ -384,7 +386,7 @@ and operates recursively.
 Return a duplex stream `d` to replicate with another forkdb.
 Pipe the endpoints to each other, duplex stream style:
 
-```
+```js
 var d = fdb.replicate();
 d.pipe(stream).pipe(d);
 ```
@@ -418,7 +420,7 @@ more than one ancestor.
 
 ## Usage
 
-```
+```sh
 usage: forkdb COMMAND OPTIONS
 
   Global options are:

@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 import { type NodeDetail } from '../state.js'
+import { shortHash } from '../hash.js'
 
 export const NodeCard:FunctionComponent<{
     node:NodeDetail,
@@ -10,10 +11,10 @@ export const NodeCard:FunctionComponent<{
     const prev = node.meta.prev ?? []
 
     return html`
-        <article class="node-card">
+        <div class="node-card">
             <header>
                 <span class="node-key">${node.meta.key}</span>
-                <code class="node-hash" title=${node.hash}>${node.hash}</code>
+                <code class="node-hash" title=${node.hash}>${shortHash(node.hash)}</code>
             </header>
 
             ${node.body ? html`<p class="node-body">${node.body}</p>` : null}
@@ -25,9 +26,10 @@ export const NodeCard:FunctionComponent<{
                         <substrate-button
                             key=${h}
                             class="hash-link"
+                            title=${h}
                             onClick=${() => onSelect(h)}
                         >
-                            ${h}
+                            ${shortHash(h)}
                         </substrate-button>
                     `)}
                 </div>
@@ -40,13 +42,14 @@ export const NodeCard:FunctionComponent<{
                         <substrate-button
                             key=${l.hash}
                             class="hash-link"
+                            title=${l.hash}
                             onClick=${() => onSelect(l.hash)}
                         >
-                            ${l.hash}
+                            ${shortHash(l.hash)}
                         </substrate-button>
                     `)}
                 </div>
             `}
-        </article>
+        </div>
     `
 }

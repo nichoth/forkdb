@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
 import { type NodeDetail } from '../state.js'
+import { shortHash } from '../hash.js'
 
 interface DagPoint {
     hash:string
@@ -171,7 +172,7 @@ export const MerkleDag:FunctionComponent<{
                             })}
 
                             ${dag.points.map((point) => {
-                                const label = point.hash.slice(0, 4)
+                                const label = shortHash(point.hash, 4)
                                 const key = point.key
                                 const keyBgWidth = Math.max(48, key.length * 12)
                                 return html`
@@ -220,7 +221,7 @@ export const MerkleDag:FunctionComponent<{
 
             ${selectedHash && html`
                 <p class="dag-selected">
-                    Selected node: <code>${selectedHash}</code>
+                    Selected node: <code title=${selectedHash}>${shortHash(selectedHash)}</code>
                 </p>
             `}
         </section>

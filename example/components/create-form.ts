@@ -5,6 +5,36 @@ import { useCallback } from 'preact/hooks'
 import { type Meta } from '../../src/browser.js'
 import { forkdb } from '../index.js'
 
+function normalizeHashToken (value:string):string {
+    return value.trim().toLowerCase().replace(/[^0-9a-f]/g, '')
+}
+
+async function resolvePrevHashes (value:string):Promise<string[]> {
+    const rawTokens = value.split(',')
+    const tokens = rawTokens
+        .map(normalizeHashToken)
+        .filter((token) => token.length > 0)
+
+    if (tokens.length === 0) return []
+
+    const nodes = await forkdb.list()
+    const knownHashes = Array.from(new Set(nodes.map((node) => node.hash.toLowerCase())))
+    const knownSet = new Set(knownHashes)
+
+    return tokens.map((token) => {
+        if (knownSet.has(token)) {
+            return token
+        }
+
+        const matches = knownHashes.filter((hash) => hash.startsWith(token))
+        if (matches.length === 1) {
+            return matches[0]!
+        }
+
+        return token
+    })
+}
+
 export const CreateForm:FunctionComponent<{
     onCreated:()=>void|Promise<void>
 }> = function CreateForm ({ onCreated }) {
@@ -16,10 +46,7 @@ export const CreateForm:FunctionComponent<{
         ev.preventDefault()
         const meta:Meta = { key: key.value }
         if (prevHash.value.trim()) {
-            meta.prev = prevHash.value
-                .split(',')
-                .map((s) => s.trim())
-                .filter(Boolean)
+            meta.prev = await resolvePrevHashes(prevHash.value)
         }
         await forkdb.put(meta, body.value)
         body.value = ''

@@ -8,6 +8,7 @@ import { NodeCard } from './components/node-card.js'
 import { BrowserForkDB } from '../src/browser.js'
 import { MerkleDag } from './components/merkle-dag.js'
 import { type NodeDetail } from './state.js'
+import { shortHash } from './hash.js'
 
 export const forkdb = new BrowserForkDB('forkdb-example')
 
@@ -85,18 +86,21 @@ export const App:FunctionComponent = function App () {
                             <p class="empty-state">No heads yet.</p>
                         `}
                         ${Object.entries(headMap.value).map(([key, hashes]) => html`
-                            <div class="heads-row" key=${key}>
-                                <span class="node-key">${key}</span>
-                                ${hashes.map((hash) => html`
-                                    <${SubstrateButton.TAG}
-                                        key=${hash}
-                                        class="hash-link head-hash"
-                                        onClick=${() => selectHash(hash)}
-                                    >
-                                        ${hash}
-                                    <//>
-                                `)}
-                            </div>
+                            <dl class="heads-row" key=${key}>
+                                <dt class="node-key">${key}</dt>
+                                <dd>
+                                    ${hashes.map((hash) => html`
+                                        <${SubstrateButton.TAG}
+                                            key=${hash}
+                                            class="hash-link head-hash"
+                                            title=${hash}
+                                            onClick=${() => selectHash(hash)}
+                                        >
+                                            ${shortHash(hash)}
+                                        <//>
+                                    `)}
+                                </dd>
+                            </dl>
                         `)}
                     </section>
                 </section>
@@ -104,7 +108,9 @@ export const App:FunctionComponent = function App () {
                 <section class="nodes-panel">
                     ${selectedNode
                         ? html`
-                            <pre class="selected-node-json">${JSON.stringify(selectedNode, null, 2)}</pre>
+                            <pre class="selected-node-json">
+                                ${JSON.stringify(selectedNode, null, 2)}
+                            </pre>
                         `
                         : html`
                             <section class="nodes-section">
