@@ -3,7 +3,7 @@ import { type FunctionComponent } from 'preact'
 import { useSignal } from '@preact/signals'
 import { useCallback } from 'preact/hooks'
 import { type Meta } from '../../src/browser.js'
-import { forkdb } from '../db.js'
+import { forkdb } from '../index.js'
 
 export const CreateForm:FunctionComponent<{
     onCreated:()=>void|Promise<void>

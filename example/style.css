@@ -26,6 +26,10 @@ body {
     margin-bottom: 8rem;
 }
 
+#root {
+    margin: 0 1rem;
+}
+
 .app {
     display: flex;
     flex-direction: column;

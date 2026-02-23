@@ -3,7 +3,7 @@ import { type FunctionComponent } from 'preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { type NodeEntry } from '../../src/browser.js'
-import { forkdb } from '../db.js'
+import { forkdb } from '../index.js'
 
 export const HistoryPanel:FunctionComponent<{
     hash:string

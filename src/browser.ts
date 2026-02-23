@@ -233,7 +233,9 @@ export class BrowserForkDB {
         return result
     }
 
-    /** Delete the IndexedDB database entirely (for demo reset). */
+    /**
+     * Delete the IndexedDB database entirely.
+     */
     async destroy ():Promise<void> {
         await this.close()
         // browser-level stores data in an IndexedDB database named after

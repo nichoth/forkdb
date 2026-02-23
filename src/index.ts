@@ -58,31 +58,31 @@ interface BlobWriteStream extends EventEmitter {
         chunk:Buffer|string,
         encoding?:BufferEncoding|WriteCallback,
         callback?:WriteCallback
-    ): boolean
-    end(callback?:() => void): this
-    end(chunk:Buffer|string, callback?:() => void): this
-    end(chunk:Buffer|string, encoding:BufferEncoding, callback?:() => void): this
-    once(event:'finish', listener:() => void): this
-    on(event:'error', listener:(err:Error) => void): this
-    on(event:'complete', listener:(hash:string) => void): this
-    emit(event:'finish'): boolean
-    emit(event:'error', err:Error): boolean
-    emit(event:'complete', hash:string): boolean
+    ):boolean
+    end(callback?:() => void):this
+    end(chunk:Buffer|string, callback?:() => void):this
+    end(chunk:Buffer|string, encoding:BufferEncoding, callback?:() => void):this
+    once(event:'finish', listener:() => void):this
+    on(event:'error', listener:(err:Error) => void):this
+    on(event:'complete', listener:(hash:string) => void):this
+    emit(event:'finish'):boolean
+    emit(event:'error', err:Error):boolean
+    emit(event:'complete', hash:string):boolean
 }
 
 interface BlobStoreLike {
-    createWriteStream(): BlobWriteStream
-    createReadStream(options:{ key:string }): NodeJS.ReadableStream
+    createWriteStream():BlobWriteStream
+    createReadStream(options:{ key:string }):NodeJS.ReadableStream
 }
 
-type ReplicateCallback = (err:Error|null, hashes:string[]) => void
-type WriteStreamResultCallback = (err:Error|null, hash:string) => void
-type RowsCallback = (err:Error|null, rows:DBRow[]) => void
+type ReplicateCallback = (err:Error|null, hashes:string[])=>void
+type WriteStreamResultCallback = (err:Error|null, hash:string)=>void
+type RowsCallback = (err:Error|null, rows:DBRow[])=>void
 type ReplicateMode = NonNullable<ReplicateOptions['mode']>
 
 interface WriteStreamOptions {
     expected?:string
-    prebatch?: (rows:DBRow[], key:string, commit:RowsCallback) => void
+    prebatch?:(rows:DBRow[], key:string, commit:RowsCallback)=>void
 }
 
 type ExchangeResponse = (
@@ -92,23 +92,23 @@ type ExchangeResponse = (
 ) => void
 
 interface ExchangeStream extends NodeJS.ReadWriteStream {
-    id(id:string): void
-    since(seq:number): void
-    seen(seq:number): void
-    provide(hashes:string[]): void
-    request(hashes:string[]): void
-    destroy(): void
-    on(event:'id', listener:(id:string) => void): this
-    on(event:'since', listener:(seq:number) => void): this
-    on(event:'seen', listener:(seq:number) => void): this
-    on(event:'available', listener:(hashes:string[]) => void): this
+    id(id:string):void
+    since(seq:number):void
+    seen(seq:number):void
+    provide(hashes:string[]):void
+    request(hashes:string[]):void
+    destroy():void
+    on(event:'id', listener:(id:string)=>void):this
+    on(event:'since', listener:(seq:number)=>void):this
+    on(event:'seen', listener:(seq:number)=>void):this
+    on(event:'available', listener:(hashes:string[])=>void):this
     on(
         event:'response',
-        listener:(hash:string, stream:NodeJS.ReadableStream, seq:number) => void
+        listener:(hash:string, stream:NodeJS.ReadableStream, seq:number)=>void
     ): this
-    on(event:'sync', listener:(hashes:string[]) => void): this
-    on(event:'error', listener:(err:Error) => void): this
-    emit(event:'sync', hashes:string[]): boolean
+    on(event:'sync', listener:(hashes:string[])=>void):this
+    on(event:'error', listener:(err:Error)=>void):this
+    emit(event:'sync', hashes:string[]):boolean
 }
 
 export default class ForkDB extends EventEmitter {
