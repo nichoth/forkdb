@@ -4,7 +4,7 @@
 [![license](https://img.shields.io/badge/license-Big_Time-blue?style=flat-square)](LICENSE)
 
 > [!NOTE]  
-> This is a resurection of [substack/forkdb](https://www.npmjs.com/package/forkdb).
+> This is a resurrection of [substack/forkdb](https://www.npmjs.com/package/forkdb).
 
 Forking content-addressed append-only historical key/value blob store over
 leveldb with multi-master replication
