@@ -113,7 +113,7 @@ test('replicating', async function (t) {
 })
 
 test('replicate verify', async function (t) {
-    t.plan(8)
+    t.plan(16)
 
     const expected = {
         heads: [{ hash: hashes[3]! }],
@@ -162,7 +162,7 @@ test('replicate verify', async function (t) {
     check(t, forkdb2, expected)
 })
 
-function check (t: any, fdb: any, expected: any) {
+function check (t:any, fdb:any, expected:any) {
     fdb.heads('blorp', (err: any, rows: any) => {
         t.ifError(err)
         t.deepEqual(rows.sort(sortByHash), expected.heads.sort(sortByHash), 'heads')
