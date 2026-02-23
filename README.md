@@ -3,6 +3,8 @@
 [![tests](https://img.shields.io/github/actions/workflow/status/nichoth/forkdb/nodejs.yml?style=flat-square)](https://github.com/nichoth/forkdb/actions/workflows/nodejs.yml)
 [![license](https://img.shields.io/badge/license-Big_Time-blue?style=flat-square)](LICENSE)
 
+> [!NOTE]  
+> This is a resurection of [substack/forkdb](https://www.npmjs.com/package/forkdb).
 
 Forking content-addressed append-only historical key/value blob store over
 leveldb with multi-master replication
