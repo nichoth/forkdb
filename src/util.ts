@@ -41,3 +41,15 @@ export function wrapRangeOptions<T extends Record<string, unknown>> (
 
     return wrapped as T & Record<string, unknown>
 }
+
+export function hashOf (p:any):string {
+    return p && typeof p === 'object' ? p.hash : p
+}
+
+export function generateId ():string {
+    let s = ''
+    for (let i = 0; i < 4; i++) {
+        s += Math.floor(Math.random() * Math.pow(16, 8)).toString(16)
+    }
+    return s
+}

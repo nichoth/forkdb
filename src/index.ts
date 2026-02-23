@@ -2,81 +2,113 @@ import exchange from 'hash-exchange'
 import bytewise from 'bytewise'
 import stringify from 'json-stable-stringify'
 import through from './through.ts'
-import { Readable } from 'node:stream'
+import { Readable, type Transform } from 'node:stream'
 import duplexer from 'duplexer2'
 import { EventEmitter } from 'events'
-import { type WriteStream } from 'node:fs'
 import FWDB from './fwdb.ts'
-import { defined, hasOwn, uniq, wrapRangeOptions } from './util.ts'
+import {
+    defined,
+    hasOwn,
+    uniq,
+    wrapRangeOptions,
+    hashOf,
+    generateId
+} from './util.ts'
 import type {
     Meta,
     ForkDBOptions,
     ReplicateOptions,
-    PrebatchOptions,
     DBRow,
     ForkDBDocument,
     LinksEntry,
     HeadsEntry
 } from './types.ts'
+
 export { defined } from './util.ts'
 
 const { decode } = bytewise
 
-// --- Helper functions ---
-function getPrev (meta: Meta | null): string[] {
-    if (!meta) return []
-    if (!hasOwn(meta, 'prev')) return []
-    const prev = meta.prev
-    if (!prev) return []
-    if (!Array.isArray(prev)) {
-        return [prev as string].map((p: any) => {
-            if (p && typeof p === 'object' && p.hash) return p.hash
-            return p
-        }).filter(Boolean) as string[]
-    }
-    return (prev as string[]).map((p: any) => {
-        if (p && typeof p === 'object' && p.hash) return p.hash
-        return p
-    }).filter(Boolean) as string[]
+type DBKey = unknown[]
+type DBIteratorRow = [DBKey, unknown]
+
+interface DBIterator extends AsyncIterable<DBIteratorRow> {
+    next():Promise<DBIteratorRow|undefined>
+    close():Promise<void>
 }
 
-function hashOf (p: any): string {
-    return p && typeof p === 'object' ? p.hash : p
+export interface ForkDBDatabase {
+    get(key:unknown):Promise<unknown>
+    put(key:unknown, value:unknown):Promise<void>
+    del(key:unknown):Promise<void>
+    batch(rows:DBRow[]):Promise<void>
+    getAsync(key:unknown):Promise<unknown>
+    putAsync(key:unknown, value:unknown):Promise<void>
+    delAsync(key:unknown):Promise<void>
+    batchAsync(rows:DBRow[]):Promise<void>
+    iterator(options?:Record<string, unknown>):DBIterator
+    on(event:'batch', listener:(rows:DBRow[]) => void):void
 }
 
-function generateId (): string {
-    let s = ''
-    for (let i = 0; i < 4; i++) {
-        s += Math.floor(Math.random() * Math.pow(16, 8)).toString(16)
-    }
-    return s
+type WriteCallback = (err?:Error|null) => void
+
+interface BlobWriteStream extends EventEmitter {
+    key:string
+    _content?:Buffer
+    write(
+        chunk:Buffer|string,
+        encoding?:BufferEncoding|WriteCallback,
+        callback?:WriteCallback
+    ): boolean
+    end(callback?:() => void): this
+    end(chunk:Buffer|string, callback?:() => void): this
+    end(chunk:Buffer|string, encoding:BufferEncoding, callback?:() => void): this
+    once(event:'finish', listener:() => void): this
+    on(event:'error', listener:(err:Error) => void): this
+    on(event:'complete', listener:(hash:string) => void): this
+    emit(event:'finish'): boolean
+    emit(event:'error', err:Error): boolean
+    emit(event:'complete', hash:string): boolean
 }
 
-// --- Inline dropFirst function ---
-function dropFirst<T = any> (cb?: (err: Error | null, meta?: T) => void) {
-    let line = false
-    const bufs: Buffer[] | null = cb ? [] : null
-    return through(function (this: any, buf: Buffer, _enc: BufferEncoding, next: () => void) {
-        if (line) {
-            this.push(buf)
-            return next()
-        }
-        for (let i = 0; i < buf.length; i++) {
-            if (buf[i] === 10) {
-                line = true
-                if (bufs) bufs.push(buf.slice(0, i))
-                if (cb && bufs) {
-                    const b = Buffer.concat(bufs).toString('utf8')
-                    let meta: T
-                    try { meta = JSON.parse(b) } catch (err) { return cb(err as Error) }
-                    cb(null, meta)
-                }
-                this.push(buf.slice(i + 1))
-                return next()
-            }
-        }
-        if (bufs) bufs.push(buf)
-    })
+interface BlobStoreLike {
+    createWriteStream(): BlobWriteStream
+    createReadStream(options:{ key:string }): NodeJS.ReadableStream
+}
+
+type ReplicateCallback = (err:Error|null, hashes:string[]) => void
+type WriteStreamResultCallback = (err:Error|null, hash:string) => void
+type RowsCallback = (err:Error|null, rows:DBRow[]) => void
+type ReplicateMode = NonNullable<ReplicateOptions['mode']>
+
+interface WriteStreamOptions {
+    expected?:string
+    prebatch?: (rows:DBRow[], key:string, commit:RowsCallback) => void
+}
+
+type ExchangeResponse = (
+    err:Error|null,
+    stream?:NodeJS.ReadableStream,
+    seq?:number
+) => void
+
+interface ExchangeStream extends NodeJS.ReadWriteStream {
+    id(id:string): void
+    since(seq:number): void
+    seen(seq:number): void
+    provide(hashes:string[]): void
+    request(hashes:string[]): void
+    destroy(): void
+    on(event:'id', listener:(id:string) => void): this
+    on(event:'since', listener:(seq:number) => void): this
+    on(event:'seen', listener:(seq:number) => void): this
+    on(event:'available', listener:(hashes:string[]) => void): this
+    on(
+        event:'response',
+        listener:(hash:string, stream:NodeJS.ReadableStream, seq:number) => void
+    ): this
+    on(event:'sync', listener:(hashes:string[]) => void): this
+    on(event:'error', listener:(err:Error) => void): this
+    emit(event:'sync', hashes:string[]): boolean
 }
 
 export default class ForkDB extends EventEmitter {
@@ -84,19 +116,19 @@ export default class ForkDB extends EventEmitter {
     private _queue:Array<() => Promise<void>>
     private _seen:Record<string, number>
     private _blobDir?:string
-    private _db:any
-    db:any
-    private _fwdb:any
-    store:any
+    private _db:ForkDBDatabase
+    private _fwdb:FWDB
     private _id:string|undefined
     private _seq:number|undefined
     private _blobs:Map<string, Buffer>
+    db:ForkDBDatabase
+    store:BlobStoreLike|null
 
-    constructor (db: any, opts: ForkDBOptions = {}) {
+    constructor (db:ForkDBDatabase, opts:ForkDBOptions = {}) {
         super()
         this._db = db
         this._fwdb = new FWDB(db)
-        this.db = this._fwdb.db
+        this.db = this._fwdb.db as ForkDBDatabase
         this._blobs = new Map()
 
         // Create appropriate blob store based on options
@@ -104,25 +136,43 @@ export default class ForkDB extends EventEmitter {
             // Use real blob store when dir is provided
             // Note: This will be initialized in _initialize for async compatibility
             this._blobDir = opts.dir
-            this.store = null as any
+            this.store = null
         } else {
             // Use mock blob store for testing that generates real content-based hashes
             this.store = {
                 createWriteStream: () => {
-                    const writable = new EventEmitter() as any
+                    const writable = new EventEmitter() as BlobWriteStream
                     const chunks: Buffer[] = []
 
-                    writable.write = (chunk: Buffer | string, encoding?: any, callback?: any) => {
+                    writable.write = (
+                        chunk:Buffer|string,
+                        encoding?:BufferEncoding|WriteCallback,
+                        callback?:WriteCallback
+                    ):boolean => {
                         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
                         const cb = typeof encoding === 'function' ? encoding : callback
-                        if (typeof cb === 'function') cb()
+                        if (typeof cb === 'function') cb(null)
+                        return true
                     }
 
-                    writable.end = (chunk?: Buffer | string, callback?: () => void) => {
+                    writable.end = (
+                        chunkOrCallback?:Buffer|string|(() => void),
+                        encodingOrCallback?:BufferEncoding|(() => void),
+                        callback?:() => void
+                    ):BlobWriteStream => {
+                        const chunk = typeof chunkOrCallback === 'function'
+                            ? undefined
+                            : chunkOrCallback
                         if (chunk) {
                             chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
                         }
-                        if (typeof callback === 'function') callback()
+
+                        const cb = typeof chunkOrCallback === 'function'
+                            ? chunkOrCallback
+                            : typeof encodingOrCallback === 'function'
+                                ? encodingOrCallback
+                                : callback
+                        if (typeof cb === 'function') cb()
 
                         // Generate simple hash for testing (not cryptographically secure)
                         const content = Buffer.concat(chunks)
@@ -141,6 +191,7 @@ export default class ForkDB extends EventEmitter {
 
                         // Emit finish event immediately - finish handler will store the blob
                         writable.emit('finish')
+                        return writable
                     }
 
                     return writable
@@ -158,7 +209,7 @@ export default class ForkDB extends EventEmitter {
 
                     return readable
                 }
-            }
+            } as BlobStoreLike
         }
 
         this._seen = {}
@@ -178,7 +229,8 @@ export default class ForkDB extends EventEmitter {
         })
         if (this._blobDir && !this.store) {
             this._queue.push(async () => {
-                const blobStore = (await import('content-addressable-blob-store')).default({ dir: this._blobDir! })
+                const blobStore = (await import('content-addressable-blob-store'))
+                    .default({ dir: this._blobDir! }) as BlobStoreLike
                 this.store = blobStore
             })
         }
@@ -187,7 +239,7 @@ export default class ForkDB extends EventEmitter {
     }
 
     // Static factory method for async initialization
-    static async create (db: any, opts: ForkDBOptions = {}): Promise<ForkDB> {
+    static async create (db:ForkDBDatabase, opts:ForkDBOptions = {}): Promise<ForkDB> {
         const instance = new ForkDB(db, opts)
         await instance._initialize()
         return instance
@@ -215,6 +267,13 @@ export default class ForkDB extends EventEmitter {
         }
     }
 
+    private _requireStore ():BlobStoreLike {
+        if (!this.store) {
+            throw new Error('Blob store is not initialized')
+        }
+        return this.store
+    }
+
     private async _getId (): Promise<string> {
         try {
             const result = await this.db.getAsync('_id')
@@ -226,9 +285,9 @@ export default class ForkDB extends EventEmitter {
                 return value
             }
 
-            return result
-        } catch (err: any) {
-            if (err.type === 'NotFoundError') {
+            return typeof result === 'string' ? result : String(result)
+        } catch (err:unknown) {
+            if (isNotFoundError(err)) {
                 const value = generateId()
                 await this.db.putAsync('_id', value)
                 return value
@@ -251,7 +310,18 @@ export default class ForkDB extends EventEmitter {
                 const row = await iterator.next()
                 if (row) {
                     const [key] = row
-                    return key[1]
+                    if (Array.isArray(key)) {
+                        return toNumber(key[1], 0)
+                    }
+                    if (Buffer.isBuffer(key)) {
+                        try {
+                            const decodedKey = decode(key)
+                            if (Array.isArray(decodedKey)) {
+                                return toNumber(decodedKey[1], 0)
+                            }
+                        } catch (_err) {}
+                    }
+                    return 0
                 }
                 return 0
             } finally {
@@ -270,10 +340,10 @@ export default class ForkDB extends EventEmitter {
 
         try {
             const seq = await this.db.getAsync(['_seen', id])
-            const n = this._seen[id] = defined(seq, -1)
+            const n = this._seen[id] = toNumber(seq, -1)
             return n
-        } catch (err: any) {
-            if (err.type !== 'NotFoundError') throw err
+        } catch (err:unknown) {
+            if (!isNotFoundError(err)) throw err
             const n = this._seen[id] = -1
             return n
         }
@@ -290,14 +360,16 @@ export default class ForkDB extends EventEmitter {
         }
     }
 
-    replicate (opts: ReplicateOptions | ((err: any, hs: any) => void) = {}): any {
+    replicate (
+        opts:ReplicateOptions|ReplicateCallback = {}
+    ):NodeJS.ReadWriteStream {
         const input = through()
         const output = through()
         const dup = duplexer(input, output)
 
         // Handle backward compatibility with callback
-        let callback: ((err: any, hs: any) => void) | undefined
-        let replicateOpts: ReplicateOptions = {}
+        let callback:ReplicateCallback|undefined
+        let replicateOpts:ReplicateOptions = {}
 
         if (typeof opts === 'function') {
             callback = opts
@@ -312,8 +384,8 @@ export default class ForkDB extends EventEmitter {
             r.on('since', dup.emit.bind(dup, 'since'))
             r.on('sync', dup.emit.bind(dup, 'sync'))
             if (callback) {
-                dup.on('available', (hs: any) => callback!(null, hs))
-                dup.on('error', (err: any) => callback!(err, []))
+                dup.on('available', (hs:string[]) => callback!(null, hs))
+                dup.on('error', (err:Error) => callback!(err, []))
             }
             input.pipe(r).pipe(output)
         })
@@ -322,27 +394,29 @@ export default class ForkDB extends EventEmitter {
         return dup
     }
 
-    private _replicate (opts: ReplicateOptions = {}): any {
-        const mode = defined(opts.mode, 'sync')
-        const errors: any[] = []
+    private _replicate (opts:ReplicateOptions = {}):ExchangeStream {
+        const mode = defined(opts.mode, 'sync') as ReplicateMode
+        const errors:Error[] = []
         const exchanged: string[] = []
         let pending = 1
         let synced = false
 
-        const ex = exchange((hash: string, fn: any) => {
+        const ex = exchange((hash:string, fn:ExchangeResponse) => {
             if (mode === 'pull') {
                 if (pending === 0) done()
                 return
             }
 
             pending++
-            this.db.getAsync(['seq-hash', hash]).then((seq: number | undefined) => {
+            this.db.getAsync(['seq-hash', hash]).then((seqRaw) => {
+                const seq = typeof seqRaw === 'number' ? seqRaw : undefined
                 if (typeof seq === 'undefined') {
                     if (--pending === 0) done()
                     return
                 }
 
-                const r = this.store.createReadStream({ key: hash })
+                const store = this._requireStore()
+                const r = store.createReadStream({ key: hash })
                 let finished = false
                 const finish = () => {
                     if (finished) return
@@ -355,22 +429,26 @@ export default class ForkDB extends EventEmitter {
             }).catch(() => {
                 if (--pending === 0) done()
             })
-        })
+        }) as ExchangeStream
 
         ex.id(JSON.stringify([this._id, mode]))
 
-        const other: { id?: string, mode?: string } = {}
+        const other:{ id?:string, mode?:ReplicateMode } = {}
         ex.on('id', async (id: string) => {
             pending--
-            let p: any
+            let p: unknown
             try {
                 p = JSON.parse(id)
             } catch (_err) {
                 ex.destroy()
                 return
             }
-            other.id = p[0]
-            other.mode = p[1]
+            if (Array.isArray(p)) {
+                const remoteId = typeof p[0] === 'string' ? p[0] : undefined
+                const remoteMode = isReplicateMode(p[1]) ? p[1] : undefined
+                if (remoteId) other.id = remoteId
+                if (remoteMode) other.mode = remoteMode
+            }
 
             if (!other.id) return
             try {
@@ -407,7 +485,7 @@ export default class ForkDB extends EventEmitter {
 
             try {
                 for await (const [_key, value] of iterator) {
-                    hashes.push(value)
+                    hashes.push(value as string)
                     provided++
                     if (hashes.length >= 25) flush()
                 }
@@ -440,21 +518,20 @@ export default class ForkDB extends EventEmitter {
             }
         })
 
-        ex.on('response', async (hash: string, stream: any, seq: number) => {
-            const writeOpts = {
+        ex.on('response', async (hash:string, stream:NodeJS.ReadableStream, seq:number) => {
+            const writeOpts:WriteStreamOptions = {
                 expected: hash,
-                prebatch: async (rows: any[], _key: string, fn: any) => {
+                prebatch: (rows:DBRow[], _key:string, fn:RowsCallback) => {
                     if (!other.id) {
                         fn(null, rows)
                         return
                     }
 
-                    try {
-                        const seenRow = await this._addSeen(other.id, seq)
+                    this._addSeen(other.id, seq).then((seenRow) => {
                         fn(null, rows.concat([seenRow]))
-                    } catch (_err) {
+                    }).catch(() => {
                         fn(null, rows)
-                    }
+                    })
                 }
             }
 
@@ -472,19 +549,19 @@ export default class ForkDB extends EventEmitter {
                 }
 
                 (async () => {
-                    const w = await this._createWriteStream(dmeta, writeOpts)
-                    df.pipe(w)
+                    const w = this._createWriteStream(dmeta, writeOpts)
+                    df.pipe(w as unknown as NodeJS.WritableStream)
                     w.on('complete', () => {
                         exchanged.push(hash)
                         if (other.id) ex.seen(seq)
                         if (--pending === 0) done()
                     })
-                    w.on('error', (writeErr: any) => {
+                    w.on('error', (writeErr:Error) => {
                         errors.push(writeErr)
                         if (--pending === 0) done()
                     })
-                })().catch((writeErr: any) => {
-                    errors.push(writeErr)
+                })().catch((writeErr:unknown) => {
+                    errors.push(toError(writeErr))
                     if (--pending === 0) done()
                 })
             })
@@ -492,12 +569,22 @@ export default class ForkDB extends EventEmitter {
         })
 
         if (opts.live) {
-            this._db.on('batch', (rows: any[]) => {
+            this._db.on('batch', (rows:DBRow[]) => {
                 const hashes: string[] = []
-                rows.forEach((row: any) => {
-                    let key: any
-                    try { key = decode(decode(row.key)[1]) } catch (_err) { return }
-                    if (key[0] === 'hash') {
+                rows.forEach((row:DBRow) => {
+                    let key: unknown
+                    try {
+                        const decoded = decode(row.key as unknown as Buffer)
+                        if (!Array.isArray(decoded)) return
+                        key = decode(decoded[1] as Buffer)
+                    } catch (_err) {
+                        return
+                    }
+                    if (
+                        Array.isArray(key) &&
+                        key[0] === 'hash' &&
+                        typeof key[1] === 'string'
+                    ) {
                         hashes.push(key[1])
                     }
                 })
@@ -514,10 +601,13 @@ export default class ForkDB extends EventEmitter {
         }
     }
 
-    createWriteStream (meta: Meta, opts: PrebatchOptions | ((err: any, hash: string) => void) = {}): any {
+    createWriteStream (
+        meta:Meta,
+        opts:WriteStreamOptions|WriteStreamResultCallback = {}
+    ):BlobWriteStream {
         // Handle backward compatibility with callback
-        let callback: ((err: any, hash: string) => void) | undefined
-        let prebatchOpts: PrebatchOptions = {}
+        let callback:WriteStreamResultCallback|undefined
+        let prebatchOpts:WriteStreamOptions = {}
 
         if (typeof opts === 'function') {
             callback = opts
@@ -530,7 +620,7 @@ export default class ForkDB extends EventEmitter {
 
         // Set up event handlers for the write stream
         if (callback) {
-            w.on('error', (err: any) => callback!(err, ''))
+            w.on('error', (err:Error) => callback!(err, ''))
             w.on('complete', (hash: string) => callback!(null, hash))
         }
 
@@ -538,19 +628,21 @@ export default class ForkDB extends EventEmitter {
     }
 
     private _createWriteStream (
-        meta: Meta,
-        opts: PrebatchOptions = {}
-    ): WriteStream {
-        const prebatch = opts.prebatch ?? ((rows: any[], _key: string, fn: any) => { fn(null, rows) })
+        meta:Meta,
+        opts:WriteStreamOptions = {}
+    ):BlobWriteStream {
+        const prebatch = opts.prebatch ??
+            ((rows:DBRow[], _key:string, fn:RowsCallback):void => { fn(null, rows) })
 
-        const w = this.store.createWriteStream()
+        const store = this._requireStore()
+        const w = store.createWriteStream()
         w.write(stringify(meta) + '\n')
 
         w.once('finish', async () => {
             try {
                 const prev = getPrev(meta)
                 // Use expected hash if provided (for replication), otherwise use computed hash
-                const hash = (opts as any).expected || w.key
+                const hash = opts.expected ?? w.key
 
                 // Store the blob content with the correct hash (expected or computed)
                 if (w._content && hash) {
@@ -575,7 +667,7 @@ export default class ForkDB extends EventEmitter {
                 rows.push({ type: 'put', key: shkey, value: this._seq })
                 rows.push({ type: 'put', key: skey, value: hash })
 
-                prebatch(rows, hash, (err: any, finalRows: any[]) => {
+                prebatch(rows, hash, (err:Error|null, finalRows:DBRow[]) => {
                     if (err) {
                         w.emit('error', err)
                         return
@@ -589,12 +681,12 @@ export default class ForkDB extends EventEmitter {
                     this.db.batchAsync(finalRows).then(() => {
                         w.emit('complete', hash)
                         this.emit('create', hash)
-                    }).catch((batchErr: any) => {
-                        w.emit('error', batchErr)
+                    }).catch((batchErr:unknown) => {
+                        w.emit('error', toError(batchErr))
                     })
                 })
-            } catch (err) {
-                w.emit('error', err)
+            } catch (err:unknown) {
+                w.emit('error', toError(err))
             }
         })
 
@@ -613,24 +705,30 @@ export default class ForkDB extends EventEmitter {
         return this._fwdb._headsAsync(key, this._normalizeOptions(opts))
     }
 
-    heads (key: string, cb: (err: any, rows: HeadsEntry[]) => void): void
+    heads (key: string, cb: (err:Error|null, rows:HeadsEntry[]) => void): void
     heads (key: string, opts?: unknown): Promise<HeadsEntry[]>
     heads (
-        key: string,
-        optsOrCb: unknown = {},
-        cb?: (err: any, rows: HeadsEntry[]) => void
-    ): Promise<HeadsEntry[]> | void {
-        const callback = typeof optsOrCb === 'function' ? optsOrCb as (err: any, rows: HeadsEntry[]) => void : cb
+        key:string,
+        optsOrCb:unknown = {},
+        cb?: (err:Error|null, rows:HeadsEntry[]) => void
+    ):Promise<HeadsEntry[]>|void {
+        const callback = typeof optsOrCb === 'function'
+            ? optsOrCb as (err:Error|null, rows:HeadsEntry[]) => void
+            : cb
         const opts = typeof optsOrCb === 'function' ? {} : this._normalizeOptions(optsOrCb)
         const promise = this.forks(key, opts)
 
         if (!callback) return promise
 
-        promise.then((rows) => callback(null, rows)).catch((err) => callback(err, []))
+        promise
+            .then((rows) => callback(null, rows))
+            .catch((err:unknown) => callback(toError(err), []))
     }
 
     async keys (opts: unknown = {}): Promise<string[]> {
-        const keysEntries = await this._fwdb.keys(this._normalizeOptions(opts))
+        const keysEntries = await this._fwdb.keys(
+            this._normalizeOptions(opts)
+        ) as Array<{ key:string }>
         return keysEntries.map(entry => entry.key)
     }
 
@@ -644,8 +742,10 @@ export default class ForkDB extends EventEmitter {
 
         try {
             for await (const [tailKey] of iterator) {
-                if (tailKey && tailKey[2]) {
-                    tailsData.push({ hash: tailKey[2] })
+                if (!Array.isArray(tailKey)) continue
+                const hash = tailKey[2]
+                if (typeof hash === 'string') {
+                    tailsData.push({ hash })
                 }
             }
         } finally {
@@ -655,67 +755,94 @@ export default class ForkDB extends EventEmitter {
         return tailsData
     }
 
-    tails (key: string, cb: (err: any, rows: Array<{ hash: string }>) => void): void
-    tails (key: string, opts?: unknown): Promise<Array<{ hash: string }>>
     tails (
-        key: string,
-        optsOrCb: unknown = {},
-        cb?: (err: any, rows: Array<{ hash: string }>) => void
+        key:string,
+        cb:(err:Error|null, rows:Array<{ hash:string }>) => void
+    ): void
+
+    tails (key: string, opts?: unknown): Promise<Array<{ hash: string }>>
+
+    tails (
+        key:string,
+        optsOrCb:unknown = {},
+        cb?: (err:Error|null, rows:Array<{ hash:string }>) => void
     ): Promise<Array<{ hash: string }>> | void {
-        const callback = typeof optsOrCb === 'function' ? optsOrCb as (err: any, rows: Array<{ hash: string }>) => void : cb
+        const callback = typeof optsOrCb === 'function'
+            ? optsOrCb as (err:Error|null, rows:Array<{ hash:string }>) => void
+            : cb
         const opts = typeof optsOrCb === 'function' ? {} : this._normalizeOptions(optsOrCb)
         const promise = this._tailsAsync(key, opts)
 
         if (!callback) return promise
 
-        promise.then((rows) => callback(null, rows)).catch((err) => callback(err, []))
+        promise
+            .then((rows) => callback(null, rows))
+            .catch((err:unknown) => callback(toError(err), []))
     }
 
     async listAsync (opts: unknown = {}): Promise<Array<{ meta: Meta, hash: string }>> {
-        const rows: Array<{ key: any[], value: Meta }> = []
+        const rows: Array<{ key: DBKey, value: Meta }> = []
 
         const iterator = this._fwdb.db.iterator(wrapRangeOptions(this._normalizeOptions(opts), {
-            gt: (x: any) => ['meta', defined(x, null)],
-            lt: (x: any) => ['meta', defined(x, undefined)]
+            gt: (x:unknown) => ['meta', defined(x, null)],
+            lt: (x:unknown) => ['meta', defined(x, undefined)]
         }))
 
         try {
             for await (const [key, value] of iterator) {
+                if (!Array.isArray(key)) continue
+                if (!isMeta(value)) continue
                 rows.push({ key, value })
             }
         } finally {
             await iterator.close()
         }
 
-        return rows.map((row) => ({ meta: row.value, hash: row.key[1] }))
+        return rows
+            .map((row) => {
+                const hash = row.key[1]
+                if (typeof hash !== 'string') return null
+                return { meta: row.value, hash }
+            })
+            .filter((row):row is { meta:Meta, hash:string } => row !== null)
     }
 
-    list (cb: (err: any, rows: Array<{ meta: Meta, hash: string }>) => void): void
+    list (
+        cb:(err:Error|null, rows:Array<{ meta:Meta, hash:string }>) => void
+    ): void
+
     list (opts?: unknown): Promise<Array<{ meta: Meta, hash: string }>>
+
     list (
         optsOrCb: unknown = {},
-        cb?: (err: any, rows: Array<{ meta: Meta, hash: string }>) => void
+        cb?: (err:Error|null, rows:Array<{ meta:Meta, hash:string }>) => void
     ): Promise<Array<{ meta: Meta, hash: string }>> | void {
-        const callback = typeof optsOrCb === 'function' ? optsOrCb as (err: any, rows: Array<{ meta: Meta, hash: string }>) => void : cb
+        const callback = typeof optsOrCb === 'function'
+            ? optsOrCb as (err:Error|null, rows:Array<{ meta:Meta, hash:string }>) => void
+            : cb
         const opts = typeof optsOrCb === 'function' ? {} : this._normalizeOptions(optsOrCb)
         const promise = this.listAsync(opts)
 
         if (!callback) return promise
 
-        promise.then((rows) => callback(null, rows)).catch((err) => callback(err, []))
+        promise
+            .then((rows) => callback(null, rows))
+            .catch((err:unknown) => callback(toError(err), []))
     }
 
     async listByKey (key: string, opts: unknown = {}): Promise<Array<{ meta: Meta, hash: string }>> {
-        const rows: Array<{ key: any[], value: Meta }> = []
+        const rows: Array<{ key: DBKey, value: Meta }> = []
 
         const iterator = this._fwdb.db.iterator(wrapRangeOptions(this._normalizeOptions(opts), {
-            gt: (x: any) => ['meta', defined(x, null)],
-            lt: (x: any) => ['meta', defined(x, undefined)]
+            gt: (x:unknown) => ['meta', defined(x, null)],
+            lt: (x:unknown) => ['meta', defined(x, undefined)]
         }))
 
         try {
             for await (const [dbKey, value] of iterator) {
-                if (value && value.key === key) {
+                if (!Array.isArray(dbKey)) continue
+                if (!isMeta(value)) continue
+                if (value.key === key) {
                     rows.push({ key: dbKey, value })
                 }
             }
@@ -723,11 +850,18 @@ export default class ForkDB extends EventEmitter {
             await iterator.close()
         }
 
-        return rows.map((row) => ({ meta: row.value, hash: row.key[1] }))
+        return rows
+            .map((row) => {
+                const hash = row.key[1]
+                if (typeof hash !== 'string') return null
+                return { meta: row.value, hash }
+            })
+            .filter((row):row is { meta:Meta, hash:string } => row !== null)
     }
 
     createReadStream (hash: string): Readable {
-        const r = this.store.createReadStream({ key: hash })
+        const store = this._requireStore()
+        const r = store.createReadStream({ key: hash })
         return r.pipe(dropFirst())
     }
 
@@ -739,23 +873,31 @@ export default class ForkDB extends EventEmitter {
             throw notFoundError
         }
 
+        if (!isMeta(meta)) {
+            throw new Error(`Invalid meta value for hash ${hash}`)
+        }
+
         return meta
     }
 
-    links (hash: string, cb: (err: any, rows: LinksEntry[]) => void): void
+    links (hash: string, cb: (err:Error|null, rows:LinksEntry[]) => void): void
     links (hash: string, opts?: unknown): Promise<LinksEntry[]>
     links (
-        hash: string,
-        optsOrCb: unknown = {},
-        cb?: (err: any, rows: LinksEntry[]) => void
+        hash:string,
+        optsOrCb:unknown = {},
+        cb?: (err:Error|null, rows:LinksEntry[]) => void
     ): Promise<LinksEntry[]> | void {
-        const callback = typeof optsOrCb === 'function' ? optsOrCb as (err: any, rows: LinksEntry[]) => void : cb
+        const callback = typeof optsOrCb === 'function'
+            ? optsOrCb as (err:Error|null, rows:LinksEntry[]) => void
+            : cb
         const opts = typeof optsOrCb === 'function' ? {} : this._normalizeOptions(optsOrCb)
         const promise = this._fwdb._linksAsync(hash, opts)
 
         if (!callback) return promise
 
-        promise.then((rows) => callback(null, rows)).catch((err) => callback(err, []))
+        promise
+            .then((rows) => callback(null, rows))
+            .catch((err:unknown) => callback(toError(err), []))
     }
 
     async linksByKey (_key: string, _opts: unknown = {}): Promise<Record<string, LinksEntry[]>> {
@@ -779,7 +921,7 @@ export default class ForkDB extends EventEmitter {
             } else {
                 next = undefined
                 r.push({ hash, meta })
-                prev.forEach((p: any) => {
+                prev.forEach((p:string) => {
                     r.emit('branch', this.history(hashOf(p)))
                 })
             }
@@ -852,7 +994,10 @@ export default class ForkDB extends EventEmitter {
         return r
     }
 
-    async concestor (hashes: string[], callback?: (err: any, result: string[]) => void): Promise<string[]> {
+    async concestor (
+        hashes:string[],
+        callback?:(err:Error|null, result:string[]) => void
+    ):Promise<string[]> {
         const seen: Record<string, number> = {}
         const seenh: Record<number, Record<string, boolean>> = {}
         const hs = hashes.map((h: string) => [h])
@@ -910,7 +1055,7 @@ export default class ForkDB extends EventEmitter {
 
             await Promise.all(promises)
 
-            // Check if we have any new hashes to process
+            // Check if there are new hashes to process
             let hasNewHashes = false
             for (const hashArray of prev) {
                 if (hashArray.length > 0) {
@@ -932,4 +1077,119 @@ export default class ForkDB extends EventEmitter {
         }
         return result
     }
+}
+
+// --- Helper functions ---
+function isNotFoundError (err:unknown): err is Error & { type?:string, code?:string } {
+    if (!(err instanceof Error)) return false
+    const ref = err as Error & { type?:string, code?:string }
+    return ref.type === 'NotFoundError' || ref.code === 'LEVEL_NOT_FOUND'
+}
+
+function toError (err:unknown): Error {
+    if (err instanceof Error) return err
+    return new Error(String(err))
+}
+
+function toNumber (value:unknown, fallback:number):number {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value
+    }
+    if (typeof value === 'string') {
+        const n = Number(value)
+        if (Number.isFinite(n)) return n
+    }
+    if (Buffer.isBuffer(value)) {
+        try {
+            return toNumber(decode(value), fallback)
+        } catch (_err) {
+            return fallback
+        }
+    }
+    return fallback
+}
+
+function isReplicateMode (value:unknown): value is ReplicateMode {
+    return value === 'sync' || value === 'push' || value === 'pull'
+}
+
+function isMeta (value:unknown): value is Meta {
+    return (
+        value !== null &&
+        typeof value === 'object' &&
+        hasOwn(value as Record<string, unknown>, 'key')
+    )
+}
+
+function getPrev (meta:Meta|null):string[] {
+    if (!meta) return []
+    if (!hasOwn(meta, 'prev')) return []
+    const prev = meta.prev
+    if (!prev) return []
+    if (!Array.isArray(prev)) {
+        return [prev]
+            .map((p) => {
+                if (typeof p === 'string') return p
+                if (
+                    p !== null &&
+                    typeof p === 'object' &&
+                    hasOwn(p as Record<string, unknown>, 'hash')
+                ) {
+                    const hash = (p as { hash?:unknown }).hash
+                    return typeof hash === 'string' ? hash : undefined
+                }
+                return undefined
+            })
+            .filter((p):p is string => typeof p === 'string')
+    }
+    return prev
+        .map((p) => {
+            if (typeof p === 'string') return p
+            if (
+                p !== null &&
+                typeof p === 'object' &&
+                hasOwn(p as Record<string, unknown>, 'hash')
+            ) {
+                const hash = (p as { hash?:unknown }).hash
+                return typeof hash === 'string' ? hash : undefined
+            }
+            return undefined
+        })
+        .filter((p):p is string => typeof p === 'string')
+}
+
+// --- Inline dropFirst function ---
+function dropFirst<T = unknown> (cb?: (err:Error|null, meta?:T) => void):Transform {
+    let line = false
+    const bufs: Buffer[] | null = cb ? [] : null
+    return through(function (
+        this:Transform,
+        buf:Buffer,
+        _enc:BufferEncoding,
+        next:() => void
+    ) {
+        if (line) {
+            this.push(buf)
+            return next()
+        }
+        for (let i = 0; i < buf.length; i++) {
+            if (buf[i] === 10) {
+                line = true
+                if (bufs) bufs.push(buf.slice(0, i))
+                if (cb && bufs) {
+                    const b = Buffer.concat(bufs).toString('utf8')
+                    let meta: T
+                    try {
+                        meta = JSON.parse(b) as T
+                    } catch (err:unknown) {
+                        return cb(toError(err))
+                    }
+                    cb(null, meta)
+                }
+                this.push(buf.slice(i + 1))
+                return next()
+            }
+        }
+        if (bufs) bufs.push(buf)
+    })
 }

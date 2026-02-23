@@ -5,9 +5,11 @@ import { useSignal } from '@preact/signals'
 import { useCallback, useEffect } from 'preact/hooks'
 import { CreateForm } from './components/create-form.js'
 import { NodeCard } from './components/node-card.js'
+import { BrowserForkDB } from '../src/browser.js'
 import { MerkleDag } from './components/merkle-dag.js'
-import { forkdb } from './db.js'
 import { type NodeDetail } from './state.js'
+
+export const forkdb = new BrowserForkDB('forkdb-example')
 
 export const App:FunctionComponent = function App () {
     const nodes = useSignal<Array<NodeDetail>>([])
