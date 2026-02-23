@@ -25,7 +25,6 @@
   ],
   "scripts": {
     "lint": "eslint \"./**/*.{ts,js}\"",
-    "//test": "esbuild test/index.ts --platform=node --format=esm --keep-names | node --input-type=module | tap-spec",
     "test": "npx ts-node --esm --project tsconfig.test.json test/index.ts",
     "build-esm": "esbuild src/*.ts --format=esm --metafile=dist/meta.json --keep-names --tsconfig=tsconfig.build.json --outdir=./dist --sourcemap && tsc --emitDeclarationOnly --project tsconfig.build.json --outDir dist",
     "build": "mkdir -p ./dist && rm -rf ./dist/* && npm run build-esm",
@@ -37,7 +36,7 @@
     "type-check": "tsc --noEmit",
     "clean": "rm -rf ./dist",
     "start": "vite",
-    "build-example": "vite build"
+    "build-example": "vite --mode staging --base=\"/forkdb\" build"
   },
   "dependencies": {
     "@substrate-system/button": "^0.0.35",
