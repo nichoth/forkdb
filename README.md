@@ -1,11 +1,11 @@
 # Forkdb
 
-[![tests](https://img.shields.io/github/actions/workflow/status/substrate-system/forkdb/nodejs.yml?style=flat-square)](https://github.com/substrate-system/forkdb/actions/workflows/nodejs.yml)
-[![types](https://img.shields.io/npm/types/@substrate-system/icons?style=flat-square)](README.md)
+[![tests](https://img.shields.io/github/actions/workflow/status/nichoth/forkdb/nodejs.yml?style=flat-square)](https://github.com/nichoth/forkdb/actions/workflows/nodejs.yml)
+[![types](https://img.shields.io/npm/types/@nichoth/icons?style=flat-square)](README.md)
 [![module](https://img.shields.io/badge/module-ESM%2FCJS-blue?style=flat-square)](README.md)
 [![semantic versioning](https://img.shields.io/badge/semver-2.0.0-blue?logo=semver&style=flat-square)](https://semver.org/)
 [![Common Changelog](https://nichoth.github.io/badge/common-changelog.svg)](./CHANGELOG.md)
-[![install size](https://flat.badgen.net/packagephobia/install/@substrate-system/forkdb)](https://packagephobia.com/result?p=@substrate-system/forkdb)
+[![install size](https://flat.badgen.net/packagephobia/install/@nichoth/forkdb)](https://packagephobia.com/result?p=@nichoth/forkdb)
 [![license](https://img.shields.io/badge/license-Big_Time-blue?style=flat-square)](LICENSE)
 
 
@@ -33,19 +33,16 @@ library is based.
 - [API Example](#api-example)
 - [Data Model](#data-model)
 - [Methods](#methods)
-- [var fdb = forkdb(db, opts)](#var-fdb--forkdbdb-opts)
-  * [`const w = fdb.createWriteStream(meta, opts={}, cb)`](#const-w--fdbcreatewritestreammeta-opts-cb)
-  * [var r = fdb.createReadStream(hash)](#var-r--fdbcreatereadstreamhash)
-  * [var r = fdb.forks(key)](#var-r--fdbforkskey)
-  * [var r = fdb.tails(key)](#var-r--fdbtailskey)
-  * [var r = fdb.list(opts)](#var-r--fdblistopts)
-  * [var r = fdb.keys(opts)](#var-r--fdbkeysopts)
-  * [fdb.get(hash, cb)](#fdbgethash-cb)
-  * [var r = fdb.links(hash)](#var-r--fdblinkshash)
-  * [var r = fdb.history(hash)](#var-r--fdbhistoryhash)
-  * [var r = fdb.future(hash)](#var-r--fdbfuturehash)
-  * [var d = fdb.replicate(opts={}, cb)](#var-d--fdbreplicateopts-cb)
-  * [`fdb.concestor(hashes, cb)`](#fdbconcestorhashes-cb)
+- [Creating an instance](#creating-an-instance)
+  * [`ForkDB.create(db, opts)`](#forkdbcreatedb-opts)
+  * [`new ForkDB(db, opts)`](#new-forkdbdb-opts)
+- [Writing and reading blobs (Web Streams)](#writing-and-reading-blobs-web-streams)
+  * [`fdb.createWritableStream(meta, opts)`](#fdbcreatewritablestreammeta-opts)
+  * [`fdb.createReadableStream(hash)`](#fdbcreatereadablestreamhash)
+- [Query APIs (Promises)](#query-apis-promises)
+- [History and future (Web Streams)](#history-and-future-web-streams)
+- [Replication (Web Streams)](#replication-web-streams)
+- [Legacy Node stream APIs](#legacy-node-stream-apis)
 - [Usage](#usage)
 
 <!-- tocstop -->
@@ -228,28 +225,25 @@ Replication woo.
 
 ## API Example
 
-Create a forkdb instance by passing in a leveldown or levelup handle and a path
-to where the blobs should go. Then you can use `createWriteStream(meta)` to
-save some data:
+Note promises and Web Streams.
 
 ```js
-var db = require('level')('/tmp/edit.db');
-var fdb = require('forkdb')(db, { dir: '/tmp/edit.blob' });
+import { Readable } from 'node:stream'
+import { Level } from 'level'
+import ForkDB from '@nichoth/forkdb'
 
-var meta = JSON.parse(process.argv[2]);
+const db = new Level('/tmp/edit.db', {
+  keyEncoding: 'json',
+  valueEncoding: 'json'
+})
 
-var w = fdb.createWriteStream(meta, function (err, id) {
-    if (err) console.error(err)
-    else console.log(id)
-});
-process.stdin.pipe(w);
-```
+const fdb = await ForkDB.create(db, { dir: '/tmp/edit.blob' })
 
-Now give the program some data on `stdin`:
+const meta = { key: 'blorp' }
+const { writable, hash } = fdb.createWritableStream(meta)
 
-```sh
-$ echo beep boop | node create.js '{"key":"blorp"}'
-9c0564511643d3bc841d769e27b1f4e669a75695f2a2f6206bca967f298390a0
+await Readable.toWeb(process.stdin).pipeTo(writable)
+console.log(await hash)
 ```
 
 ## Data Model
@@ -258,6 +252,16 @@ The data model is append-only. Each document operates under a key and may
 reference zero or more other documents by the hash of their content, which
 always point backward in time. That is, to have a link to a document, the
 document must first exist because the link is the hash of its content.
+
+For the core `ForkDB` implementation, the node hash is the content hash of the
+exact bytes written into blob storage:
+
+1. `json-stable-stringify(meta)` encoded as UTF-8
+2. A single newline byte (`\n`)
+3. The raw document body bytes
+
+With the default `content-addressable-blob-store`, the hash is a full
+hex-encoded SHA-256 digest of those bytes.
 
 Each document can link back to zero, one, or many other documents from any other
 key. You can make these links mean semantically whatever you wish, but given how
@@ -282,141 +286,124 @@ slowly, from the backward links.
 ## Methods
 
 ```js
-var forkdb = require('forkdb')
+import ForkDB from '@nichoth/forkdb'
 ```
 
-## var fdb = forkdb(db, opts)
+## Creating an instance
 
-Create a new forkdb instance `fdb` from a levelup or leveldown `db`.
+### `ForkDB.create(db, opts)`
 
-Optionally set:
+Preferred async constructor. Returns a fully initialized instance.
 
-* `opts.id` - uniquely identify the current instance. This id is used to
-  negotiate sequences for replication and MUST be unique to correctly identify
-  this database.
-* `opts.dir` - directory to use for blob storage, default: './forkdb.blob'
-* `opts.store` - content-addressable [abstract-blob-store](https://npmjs.org/package/abstract-blob-store) to use instead of
-[content-addressable-blob-store](https://npmjs.org/package/content-addressable-blob-store)
+### `new ForkDB(db, opts)`
 
-To run both the command-line tool and the api over the same data simultaneously,
-use [level-party](https://npmjs.org/package/level-party) to create the `db`.
+Synchronous constructor. Initialization continues in the background.
+Use `ForkDB.create()` if you want to await readiness.
 
-### `const w = fdb.createWriteStream(meta, opts={}, cb)`
+`opts`:
 
-Save the data written to the writable stream `w` into blob storage at
-`meta.key`. To link back to previous documents, specify an array of objects with
-`key` and `hash` properties as `meta.prev`. For example:
+* `opts.id` - unique instance ID used for replication sequence tracking
+* `opts.dir` - blob directory for `content-addressable-blob-store`
+
+## Writing and reading blobs (Web Streams)
+
+### `fdb.createWritableStream(meta, opts)`
+
+Returns:
+
+* `writable` - `WritableStream<Uint8Array|string>`
+* `hash` - `Promise<string>` that resolves when write + index commit completes
+
+`meta` must include `meta.key`. To link previous nodes, set `meta.prev` to
+hashes (array or single value).
+
+`opts.prebatch(rows, hash, commit)` lets you mutate/augment batch rows before
+commit.
+
+Example:
 
 ```js
-meta.key = 'blorp';
-meta.prev = [
-  { key: 'blorp', hash: 'fcbcbe4389433dd9652d279bb9044b8e570d7f033fab18189991354228a43e99' },
-  { key: 'blorp', hash: 'c3122c908bf03bb8b36eaf3b46e27437e23827e6a341439974d5d38fb22fbdfc' }
-];
+const { writable, hash } = fdb.createWritableStream({
+  key: 'blorp',
+  prev: ['9c056451...']
+})
+
+await new Blob(['beep boop']).stream().pipeTo(writable)
+const id = await hash
 ```
 
-`cb(err, key)` fires when an error occurs or when all the data has been written
-successfully to blob storage and leveldb under the key `key`.
+### `fdb.createReadableStream(hash)`
 
-Optionally, you can set an `opts.prebatch(rows, key, fn)` function that gets
-runs before `db.batch()` with the hash of the content, `key`. Your prebatch
-function should call `fn(err, rows)` with the rows to insert.
+Returns `ReadableStream<Uint8Array>` for blob contents at `hash`.
 
-### var r = fdb.createReadStream(hash)
+## Query APIs (Promises)
 
-Return a readable stream `r` with the blob content at `hash`.
+These APIs are Promise-based:
 
-### var r = fdb.forks(key)
+* `await fdb.forks(key, opts?)` (alias: `heads`) -> `{ hash }[]`
+* `await fdb.heads(key, opts?)` -> `{ hash }[]`
+* `await fdb.tails(key, opts?)` -> `{ hash }[]`
+* `await fdb.keys(opts?)` -> `string[]`
+* `await fdb.list(opts?)` -> `{ meta, hash }[]`
+* `await fdb.listByKey(key, opts?)` -> `{ meta, hash }[]`
+* `await fdb.get(hash)` -> `meta`
+* `await fdb.links(hash, opts?)` -> `{ key, hash }[]`
+* `await fdb.concestor(hashes)` -> `string[]`
 
-Return a readable object stream `r` that outputs an object with `key` and `hash`
-properties for every head of `key`.
+`opts` can include range/limit controls (`gt`, `lt`, `limit`) where supported.
 
-If `key` is undefined, all heads from all the keys are output.
+Node-style callbacks are still accepted by some methods for backward
+compatibility, but Promise usage is preferred.
 
-### var r = fdb.tails(key)
+## History and future (Web Streams)
 
-Return a readable object stream `r` that outputs an object with `key` and `hash`
-properties for every tail of `key`.
+### `fdb.historyStream(hash)`
 
-If `key` is undefined, all tails from all the keys are output.
+Returns `ReadableStream<{ hash, meta }>` traversing backward.
 
-### var r = fdb.list(opts)
+### `fdb.futureStream(hash)`
 
-Return a readable object stream `r` that outputs each metadata object for every
-document in the database.
+Returns `ReadableStream<{ hash, meta }>` traversing forward.
 
-Constrain the output stream by passing in `opts.gt`, `opts.lt`, or `opts.limit`.
+For branch-event traversal (`'branch'` events), use legacy Node-stream
+`history()` / `future()` methods.
 
-### var r = fdb.keys(opts)
+## Replication (Web Streams)
 
-Return a readable object stream `r` that outputs a record for every key in the
-database.
+### `fdb.replicateStream(opts?)`
 
-Constrain the output stream by passing in `opts.gt`, `opts.lt`, or `opts.limit`.
+Returns:
 
-### fdb.get(hash, cb) 
+* `readable` - outbound `ReadableStream<Uint8Array>`
+* `writable` - inbound `WritableStream<Uint8Array>`
+* `synced` - `Promise<string[]>` resolved with exchanged hashes when sync fires
 
-Get the metadata for `hash` and call `cb(err, meta)` with the result.
+`opts.mode`: `'sync' | 'push' | 'pull'` (default `'sync'`).
 
-### var r = fdb.links(hash)
+`opts.live`: keep replication open for ongoing changes.
 
-Return a readable object stream `r` that outputs an object with `key` and `hash`
-properties for every forward link of `hash`.
-
-### var r = fdb.history(hash)
-
-Return a readable object stream `r` that traverses backward starting from
-`hash`, outputting a metadata object for each document in the history.
-
-When the traversal comes to a branch, `r` ends and emits a `'branch'` event with
-a `b` object for each branch. The branch object `b` has the same behavior as `r`
-and operates recursively.
-
-### var r = fdb.future(hash)
-
-Return a readable object stream `r` that traverses forward starting from `hash`,
-outputting a metadata object for each document in the future history.
-
-When the traversal comes to a branch, `r` ends and emits a `'branch'` event with
-a `b` object for each branch. The branch object `b` has the same behavior as `r`
-and operates recursively.
-
-### var d = fdb.replicate(opts={}, cb)
-
-Return a duplex stream `d` to replicate with another forkdb.
-Pipe the endpoints to each other, duplex stream style:
+Example wiring two instances:
 
 ```js
-var d = fdb.replicate();
-d.pipe(stream).pipe(d);
+const a = fdbA.replicateStream({ mode: 'sync' })
+const b = fdbB.replicateStream({ mode: 'sync' })
+
+await Promise.all([
+  a.readable.pipeTo(b.writable),
+  b.readable.pipeTo(a.writable),
+  a.synced,
+  b.synced
+])
 ```
 
-for some full-duplex `stream`, for example from a tcp connection.
+## Legacy Node stream APIs
 
-Specify the replication strategy with `opts.mode`:
+These remain available for compatibility:
 
-* `opts.mode === 'sync'` - multi-master replication (default strategy)
-* `opts.mode === 'push'` - only send updates
-* `opts.mode === 'pull'` - only receive updates
-
-Note that if both endpoints try to push or both endpoints try to pull from each
-other, nothing will happen.
-
-forkdb saves the last sequence successfully replicated for each remote host to
-avoid sending hashes for sequences that remote hosts already know about.
-
-Set `opts.live` to `true` to keep the stream open for continuous streaming
-replication as new documents are created.
-
-### `fdb.concestor(hashes, cb)`
-
-Compute the
-[concestor](https://en.wikipedia.org/wiki/Most_recent_common_ancestor)
-for `hashes`, an array of strings.
-
-`cb(err, cons)` fires with `cons`, an array of concestors or an empty array if
-there is no common ancestor. If there is a tie for recency, `cons` will contain
-more than one ancestor.
+* `createWriteStream(meta, opts?, cb?)`
+* `createReadStream(hash)`
+* `history(hash)` / `future(hash)` with `'branch'` events
+* `replicate(opts?, cb?)`
 
 ## Usage
 

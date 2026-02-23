@@ -59,11 +59,6 @@ declare module 'has' {
     export = has
 }
 
-declare module 'json-stable-stringify' {
-    function stringify(value: any, options?: any): string
-    export = stringify
-}
-
 declare module 'uniq' {
     function uniq<T>(array: T[]): T[]
     export = uniq

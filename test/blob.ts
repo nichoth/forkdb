@@ -1,9 +1,9 @@
 import { test } from '@substrate-system/tapzero'
 import path from 'node:path'
-import level from './lib/level.js'
-import { mkdirSync } from 'node:fs'
-import concat from './lib/concat-stream.js'
 import { tmpdir } from 'node:os'
+import { mkdirSync } from 'node:fs'
+import level from './lib/level.js'
+import concat from './lib/concat-stream.js'
 import ForkDB from '../src/index.ts'
 
 const testDir = path.join(

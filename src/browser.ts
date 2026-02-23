@@ -6,6 +6,7 @@
  * (IndexedDB).  No Node.js streams or Buffer polyfills required.
  */
 import { BrowserLevel } from 'browser-level'
+import { stringify } from '@substrate-system/json-canon'
 import { toHex } from './util.ts'
 
 // ---- types ----------------------------------------------------------------
@@ -65,7 +66,7 @@ export class BrowserForkDB {
      */
     async put (meta:Meta, body = ''):Promise<string> {
         const prev = getPrev(meta)
-        const hashInput = JSON.stringify({ key: meta.key, prev, body })
+        const hashInput = stringify({ key: meta.key, prev, body })
         const hash = await contentHash(hashInput)
 
         const ops:Array<{ type:'put'|'del', key:string[], value?:unknown }> = []

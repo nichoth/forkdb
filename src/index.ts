@@ -1,8 +1,8 @@
 import exchange from 'hash-exchange'
 import bytewise from 'bytewise'
-import stringify from 'json-stable-stringify'
 import through from './through.ts'
-import { Readable, type Transform } from 'node:stream'
+import { Duplex, Readable, Writable, type Transform } from 'node:stream'
+import { stringify } from '@substrate-system/json-canon'
 import duplexer from 'duplexer2'
 import { EventEmitter } from 'events'
 import FWDB from './fwdb.ts'
@@ -63,6 +63,8 @@ interface BlobWriteStream extends EventEmitter {
     end(chunk:Buffer|string, callback?:() => void):this
     end(chunk:Buffer|string, encoding:BufferEncoding, callback?:() => void):this
     once(event:'finish', listener:() => void):this
+    once(event:'error', listener:(err:Error) => void):this
+    once(event:'complete', listener:(hash:string) => void):this
     on(event:'error', listener:(err:Error) => void):this
     on(event:'complete', listener:(hash:string) => void):this
     emit(event:'finish'):boolean
@@ -109,6 +111,17 @@ interface ExchangeStream extends NodeJS.ReadWriteStream {
     on(event:'sync', listener:(hashes:string[])=>void):this
     on(event:'error', listener:(err:Error)=>void):this
     emit(event:'sync', hashes:string[]):boolean
+}
+
+export interface WritableCreateResult {
+    writable:WritableStream<Uint8Array|string>
+    hash:Promise<string>
+}
+
+export interface ReplicateWebResult {
+    readable:ReadableStream<Uint8Array>
+    writable:WritableStream<Uint8Array>
+    synced:Promise<string[]>
 }
 
 export default class ForkDB extends EventEmitter {
@@ -394,6 +407,53 @@ export default class ForkDB extends EventEmitter {
         return dup
     }
 
+    createWritableStream (
+        meta:Meta,
+        opts:WriteStreamOptions = {}
+    ):WritableCreateResult {
+        const writableNode = this._createWriteStream(meta, opts)
+        const hash = new Promise<string>((resolve, reject) => {
+            writableNode.once('complete', (value:string) => resolve(value))
+            writableNode.once('error', (err:unknown) => reject(err))
+        })
+
+        return {
+            writable: Writable.toWeb(
+                writableNode as unknown as Writable
+            ) as WritableStream<Uint8Array|string>,
+            hash
+        }
+    }
+
+    createReadableStream (hash:string):ReadableStream<Uint8Array> {
+        const readableNode = this.createReadStream(hash)
+        return Readable.toWeb(readableNode as unknown as Readable) as ReadableStream<Uint8Array>
+    }
+
+    historyStream (hash:string):ReadableStream<{ hash:string, meta:Meta }> {
+        const historyNode = this.history(hash)
+        return Readable.toWeb(historyNode as unknown as Readable) as ReadableStream<{ hash:string, meta:Meta }>
+    }
+
+    futureStream (hash:string):ReadableStream<{ hash:string, meta:Meta }> {
+        const futureNode = this.future(hash)
+        return Readable.toWeb(futureNode as unknown as Readable) as ReadableStream<{ hash:string, meta:Meta }>
+    }
+
+    replicateStream (opts:ReplicateOptions = {}):ReplicateWebResult {
+        const duplexNode = this.replicate(opts)
+        const synced = new Promise<string[]>((resolve, reject) => {
+            duplexNode.once('sync', (hashes:string[]) => resolve(hashes))
+            duplexNode.once('error', (err:Error) => reject(err))
+        })
+        const web = Duplex.toWeb(duplexNode as unknown as Duplex)
+        return {
+            readable: web.readable as ReadableStream<Uint8Array>,
+            writable: web.writable as WritableStream<Uint8Array>,
+            synced
+        }
+    }
+
     private _replicate (opts:ReplicateOptions = {}):ExchangeStream {
         const mode = defined(opts.mode, 'sync') as ReplicateMode
         const errors:Error[] = []
@@ -431,7 +491,7 @@ export default class ForkDB extends EventEmitter {
             })
         }) as ExchangeStream
 
-        ex.id(JSON.stringify([this._id, mode]))
+        ex.id(stringify([this._id, mode]))
 
         const other:{ id?:string, mode?:ReplicateMode } = {}
         ex.on('id', async (id: string) => {

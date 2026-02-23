@@ -59,6 +59,16 @@ header.app-header {
     margin-top: 1rem;
 }
 
+.hash-explainer {
+    max-width: 40rem;
+    & p {
+        line-height: 1.4;
+    }
+    & p:last-child {
+        margin-bottom: 0;
+    }
+}
+
 button {
     cursor: pointer;
     min-width: 8rem;
@@ -165,6 +175,14 @@ substrate-button button.create-submit {
 
 .nodes-section h2 {
     margin-bottom: 1rem;
+}
+
+.node-json {
+    margin: 0 0 1rem;
+    white-space: pre;
+    overflow: auto;
+    border: 1px solid var(--border);
+    padding: 1rem;
 }
 
 .selected-node-json {

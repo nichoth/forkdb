@@ -4,7 +4,6 @@ import { SubstrateButton } from '@substrate-system/button'
 import { useSignal } from '@preact/signals'
 import { useCallback, useEffect } from 'preact/hooks'
 import { CreateForm } from './components/create-form.js'
-import { NodeCard } from './components/node-card.js'
 import { BrowserForkDB } from '../src/browser.js'
 import { MerkleDag } from './components/merkle-dag.js'
 import { type NodeDetail } from './state.js'
@@ -70,6 +69,18 @@ export const App:FunctionComponent = function App () {
                 </substrate-button>
             </header>
 
+            <section class="hash-explainer">
+                <p>
+                    Each node hash is computed like this:
+                    ${' '}<code>hash(JSON.stringify({ key, prev, body }))</code>
+                </p>
+                <p>
+                    The hash is SHA-256 over the UTF-8 bytes of that string.
+                    Forward links are mutable derived indexes, so they are not
+                    part of the hash input.
+                </p>
+            </section>
+
             <div class="app-grid">
                 <${CreateForm} onCreated=${refresh} />
 
@@ -121,11 +132,9 @@ export const App:FunctionComponent = function App () {
                                     </p>
                                 `}
                                 ${nodes.value.map((node) => html`
-                                    <${NodeCard}
-                                        key=${node.hash}
-                                        node=${node}
-                                        onSelect=${selectHash}
-                                    />
+                                    <pre class="node-json" key=${node.hash}>
+                                        ${JSON.stringify(node, null, 2)}
+                                    </pre>
                                 `)}
                             </section>
                         `}
